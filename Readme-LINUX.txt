@@ -23,3 +23,12 @@ configure options are :
 
 The menu is a pop-up menu in the Linux port. Right-click on the main window when mouse is not
 captured.
+
+
+Kieran's notes for building on Windows (for me at least!)
+Use MSYS2/mingw32 shell (not 64!) for correct version of gcc.
+Put SDL2, wxWidgets, OpenAL libraries in ../../Libs.
+Use make -f Makefile.mingw in src.
+Copy Arculator.exe to parent folder.
+Need dependent mingw32/bin dlls to run standalone in Windows.
+Use Visual Studio DUMPBIN /DEPENDENTS tool to check DLL dependencies.

@@ -1,0 +1,11 @@
+
+*.o
+config.log
+src/arculator.res
+roms
+configs
+cmos
+modules.dmp
+arc.cfg
+*.dll
+*.exe
