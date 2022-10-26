@@ -185,6 +185,8 @@ void ConfigSelDialog::OnConfig(wxCommandEvent &event)
         wxString config_path = GetConfigPath(list->GetStringSelection());
         strcpy(machine_config_file, config_path.mb_str());
 
+        rpclog("OnConfig: machine_config_file='%s'\n", machine_config_file);
+
         loadconfig();
         ShowConfig(false);
 }

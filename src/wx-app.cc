@@ -29,6 +29,7 @@ extern "C"
         #include "config.h"
         #include "debugger.h"
         #include "disc.h"
+        #include "mem.h"
         #include "plat_joystick.h"
         #include "plat_video.h"
         #include "romload.h"
@@ -203,6 +204,9 @@ void Frame::UpdateMenu(wxMenu *menu)
         item->Enable(video_renderer_available(RENDERER_SOFTWARE) ? true : false);
         item->Check((selected_video_renderer == RENDERER_SOFTWARE) ? true : false);
 
+        item = ((wxMenu*)menu)->FindItem(XRCID("IDM_SUPER_REQUIRED"));
+        item->Check(mem_super_req);
+
         item = ((wxMenu*)menu)->FindItem(XRCID("IDM_DEBUGGER_ENABLE"));
         item->Check(debug);
 }
@@ -345,6 +349,13 @@ void Frame::OnMenuCommand(wxCommandEvent &event)
                 arc_pause_main_thread();
                 ShowConfig(true);
                 arc_resume_main_thread();
+        }
+        else if (event.GetId() == XRCID("IDM_SUPER_REQUIRED"))
+        {
+                mem_super_req ^= 1;
+
+                wxMenuItem *item = ((wxMenu*)menu)->FindItem(event.GetId());
+                item->Check(mem_super_req);
         }
         else if (event.GetId() == XRCID("IDM_VIDEO_FULLSCR"))
         {

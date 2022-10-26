@@ -9,3 +9,6 @@ modules.dmp
 arc.cfg
 *.dll
 *.exe
+arclog.txt
+rocket_log.txt
+hostfs/Rocket
