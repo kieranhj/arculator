@@ -2,32 +2,36 @@
 
 typedef struct st506_t
 {
-        uint8_t status;
-        uint8_t param[16];
-        uint8_t cul;
-        uint8_t command;
-        int rp, wp;
-        int track[2];
-        int lsect, lcyl, lhead, drive;
-        int oplen;
-        uint8_t OM1;
-        uint8_t ssb;
-        int drq;
-        int first;
-        
-        int spt[2], hpc[2];
+	uint8_t status;
+	uint8_t param[16];
+	uint8_t cul;
+	uint8_t command;
+	int rp, wp;
+	int track[2];
+	int lsect, lcyl, lhead, drive;
+	int oplen;
+	uint8_t OM1;
+	uint8_t ssb;
+	int drq;
+	int first;
+	int ns[2], nh[2], nc[2];
 
-        emu_timer_t timer;
-        FILE *hdfile[2];
-        uint8_t buffer[272];
-        
-        void (*irq_raise)(struct st506_t *st506);
-        void (*irq_clear)(struct st506_t *st506);
-        
-        void *p;
+	int spt[2], hpc[2], cyl[2];
+
+	emu_timer_t timer;
+	FILE *hdfile[2];
+	uint8_t buffer[272];
+
+	void (*irq_raise)(struct st506_t *st506);
+	void (*irq_clear)(struct st506_t *st506);
+
+	void *p;
 } st506_t;
 
-void st506_init(st506_t *st506, char *fn_pri, int pri_spt, int pri_hpc, char *fn_sec, int sec_spt, int sec_hpc, void (*irq_raise)(st506_t *st506), void (*irq_clear)(st506_t *st506), void *p);
+void st506_init(st506_t *st506,
+		char *fn_pri, int pri_spt, int pri_hpc, int pri_cyl,
+		char *fn_sec, int sec_spt, int sec_hpc, int sec_cyl,
+		void (*irq_raise)(st506_t *st506), void (*irq_clear)(st506_t *st506), void *p);
 void st506_close(st506_t *st506);
 uint8_t st506_readb(st506_t *st506, uint32_t addr);
 uint32_t st506_readl(st506_t *st506, uint32_t addr);

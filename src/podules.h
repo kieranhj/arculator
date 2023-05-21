@@ -32,10 +32,10 @@ extern char podule_names[4][16];
 
 typedef struct podule_internal_state_t
 {
-        podule_t podule;
-        int irq, fiq;
-        emu_timer_t timer;
-        uint64_t last_callback_tsc;
+	podule_t podule;
+	int irq, fiq;
+	emu_timer_t timer;
+	uint64_t last_callback_tsc;
 } podule_internal_state_t;
 
 void rethinkpoduleints(void);
@@ -53,5 +53,7 @@ extern void *podule_config_get_current(void *window_p, int id);
 extern void podule_config_set_current(void *window_p, int id, void *val);
 int podule_config_file_selector(void *window_p, const char *title, const char *default_path, const char *default_fn, const char *default_ext, const char *wildcard, char *dest, int dest_len, int flags);
 int podule_config_open(void *window_p, podule_config_t *config, const char *prefix);
+
+uint32_t podule_validate_and_get_valid_flags(podule_header_t *header);
 
 #endif

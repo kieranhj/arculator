@@ -1,8 +1,8 @@
 # configure.ac for Arculator
 #
 
-AC_PREREQ([2.61])
-AC_INIT(Arculator, v2.0, Sarah Walker <b-em@bbcmicro.com>, arculator)
+AC_PREREQ([2.71])
+AC_INIT([Arculator],[v2.0],[Sarah Walker <b-em@bbcmicro.com>],[arculator])
 
 AC_CANONICAL_HOST
 
@@ -10,28 +10,28 @@ AM_INIT_AUTOMAKE
 AC_PROG_CC
 AC_PROG_CXX
 AM_PROG_CC_C_O
-LT_INIT([disable-static], [shared])
+AC_CACHE_VAL(lt_cv_deplibs_check_method,
+    [lt_cv_deplibs_check_method=pass_all])
+LT_INIT([disable-static], [shared], [win32-dll])
 
 
 AC_MSG_CHECKING([whether to enable debugging])
 AC_ARG_ENABLE(debug,
-          AC_HELP_STRING([--enable-debug], [build debug executable]))
+          AS_HELP_STRING([--enable-debug],[build debug executable]))
 if test "$enable_debug" = "yes"; then
-   CFLAGS="-Wall -O0 -g -D_DEBUG -DDEBUG_LOG"
-   CXXFLAGS="-Wall -O0 -g -D_DEBUG -DDEBUG_LOG"
+   CFLAGS_BUILD="-Wall -O0 -g -D_DEBUG -DDEBUG_LOG"
    AC_MSG_RESULT([yes])
 else
-   CFLAGS="-O3"
-   CXXFLAGS="-O3"
+   CFLAGS_BUILD="-O3"
    AC_MSG_RESULT([no])
 fi
 
 AC_MSG_CHECKING([whether to build for release])
 AC_ARG_ENABLE(release_build,
-          AC_HELP_STRING([--enable-release-build], [build for release]))
+          AS_HELP_STRING([--enable-release-build],[build for release]))
 if test "$enable_release_build" = "yes"; then
    AC_MSG_RESULT([yes])
-   CFLAGS += " -DRELEASE_BUILD"
+   CFLAGS_RELEASE=" -DRELEASE_BUILD"
 else
    AC_MSG_RESULT([no])
 fi
@@ -39,7 +39,7 @@ AM_CONDITIONAL(RELEASE_BUILD, [test "$enable_release_build" = "yes"])
 
 AC_MSG_CHECKING([whether to build podules])
 AC_ARG_ENABLE(podules,
-          AC_HELP_STRING([--disable-podules], [don't build podules]))
+          AS_HELP_STRING([--disable-podules],[don't build podules]))
 if test "$enable_podules" != "no"; then
    AC_MSG_RESULT([yes])
 else
@@ -63,7 +63,7 @@ AM_PATH_WXCONFIG($reqwx, wxWin=1)
 if test "$wxWin" != 1; then
    AC_MSG_ERROR([
       wxWidgets must be installed on your system.
- 
+
       Please check that wx-config is in path, the directory
       where wxWidgets libraries are installed (returned by
       'wx-config --libs' or 'wx-config --static --libs' command)
@@ -81,20 +81,13 @@ build_other="no"
 
 case "$host" in
     *-*-darwin*)
-       LIBS="$LIBS -framework OpenAL"
        build_macosx="yes"
        ;;
     *-*-cygwin* | *-*-mingw32*)
-       AC_CHECK_LIB([openal], [alGetError], [], \
-          [echo "You need to install the OpenAL library."
-           exit -1])
        build_win="yes"
        AC_SUBST(SET_MAKE, 'MAKE=mingw32-make')
        ;;
     *-*-linux*)
-       AC_CHECK_LIB([openal], [alGetError], [], \
-           [echo "You need to install the OpenAL library."
-           exit -1])
        if test "$enable_podules" != "no"; then
           AC_CHECK_LIB(asound, snd_pcm_open,
                [],
@@ -104,13 +97,12 @@ case "$host" in
        build_linux="yes"
        ;;
     *)
-       AC_CHECK_LIB([openal], [alGetError], [], \
-           [echo "You need to install the OpenAL library."
-           exit -1])
        build_other="yes"
        ;;
 esac
 
+CFLAGS="$CFLAGS_BUILD $CFLAGS_RELEASE"
+CXXFLAGS="$CFLAGS_BUILD $CFLAGS_RELEASE"
 LIBS="$LIBS $WX_LIBS $SDL_LIBS"
 
 AM_CONDITIONAL(OS_LINUX, [test "$build_linux" = "yes"])
@@ -120,6 +112,8 @@ AM_CONDITIONAL(OS_MACOSX, [test "$build_macosx" = "yes"])
 
 AM_CONDITIONAL(BUILD_PODULES, [test "$enable_podules" != "no"])
 
-AC_OUTPUT([Makefile src/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile])
+AC_OUTPUT
 
-AC_OUTPUT([podules/aka05/src/Makefile podules/aka10/src/Makefile podules/aka12/src/Makefile podules/aka16/src/Makefile podules/aka31/src/Makefile podules/lark/src/Makefile podules/midimax/src/Makefile podules/morley_uap/src/Makefile podules/oak_scsi/src/Makefile podules/ultimatecdrom/src/Makefile])
+AC_CONFIG_FILES([podules/aeh50/src/Makefile podules/aeh54/src/Makefile podules/aka05/src/Makefile podules/aka10/src/Makefile podules/aka12/src/Makefile podules/aka16/src/Makefile podules/aka31/src/Makefile podules/designit_e200/src/Makefile podules/lark/src/Makefile podules/midimax/src/Makefile podules/morley_uap/src/Makefile podules/oak_scsi/src/Makefile podules/pccard/src/Makefile podules/ultimatecdrom/src/Makefile])
+AC_OUTPUT

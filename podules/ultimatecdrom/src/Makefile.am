@@ -8,6 +8,13 @@ lib_LTLIBRARIES = libultimatecdrom.la
 noinst_SCRIPTS =
 CLEANFILES =
 
+if OS_WINDOWS
+CLEANFILES += $(noinst_SCRIPTS)
+noinst_SCRIPTS += ../ultimatecdrom.dll
+../ultimatecdrom.dll: libultimatecdrom.la
+	cp .libs/libultimatecdrom-0.dll ../ultimatecdrom.dll
+libultimatecdrom_la_LDFLAGS = -no-undefined
+endif
 if OS_LINUX
 CLEANFILES += $(noinst_SCRIPTS)
 noinst_SCRIPTS += ../ultimatecdrom.so
@@ -21,18 +28,18 @@ noinst_SCRIPTS += ../ultimatecdrom.dylib
 	cp .libs/libultimatecdrom.dylib ../ultimatecdrom.dylib
 endif
 
-amrefresh:	
+amrefresh:
 
-libultimatecdrom_la_SOURCES = mitsumi.c ultimatecdrom.c ../../common/sound/sound_openal.c
+libultimatecdrom_la_SOURCES = mitsumi.c ultimatecdrom.c ../../common/sound/sound_out_sdl2.c
 
 if OS_WINDOWS
-libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-windows-ioctl.c 
+libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-windows-ioctl.c
 endif
 if OS_LINUX
-libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-linux-ioctl.c 
+libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-linux-ioctl.c
 endif
 if OS_MACOSX
-libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-osx-ioctl.c 
+libultimatecdrom_la_SOURCES += ../../common/cdrom/cdrom-osx-ioctl.c
 endif
 
 libultimatecdrom_la_CFLAGS = -I../../../src -I../../common/cdrom -I../../common/sound
