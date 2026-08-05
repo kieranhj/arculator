@@ -187,14 +187,32 @@ def main():
     check("watchpoint does not stop execution", r["reason"] == "budget",
           f"reason={r['reason']}")
 
-    print("\n=== 10. chip state ===")
+    print("\n=== 12. chip state ===")
     for chip in ("ioc", "memc", "vidc"):
         text = m.command_text(f"dump {chip}")
         check(f"{chip} dumps", len(text) > 20, f"{len(text)} bytes")
     cam = m.command_text("dump memc_cam")
     check("memc_cam dumps", "addr=" in cam, f"{len(cam)} bytes")
 
-    print("\n=== 11. determinism ===")
+    print("\n=== 13. sound capture ===")
+    # Checks the capture path, not that the guest is making a noise: an idle
+    # RISC OS desktop emits silence, so a zero peak here is expected and only
+    # the framing is asserted.
+    m.command_text("sound start")
+    m.command_json("run_us 1000000")
+    m.command_text("sound stop")
+    audio = m.command("sound fetch")
+    rate, channels, frames, pcm = png.decode_arsn(audio)
+    check("audio framing is correct",
+          rate == 48000 and channels == 2 and len(pcm) == frames * 4,
+          f"{rate} Hz, {channels}ch, {frames} frames, {len(pcm)} bytes")
+    check("captured roughly the requested duration",
+          0.7 < frames / rate < 1.3, f"{frames/rate:.2f}s for 1.00s requested")
+    wav = png.arsn_to_wav(audio)
+    check("wraps as a valid WAV",
+          wav[:4] == b"RIFF" and wav[8:12] == b"WAVE", f"{len(wav)} bytes")
+
+    print("\n=== 14. determinism ===")
     pool.destroy(mid)
     runs = []
     for i in range(2):
