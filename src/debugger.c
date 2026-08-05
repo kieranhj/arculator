@@ -21,11 +21,57 @@ void debug_kill(void)
 {
 }
 
+/*When a capture buffer is installed, debug_out() appends to it instead of
+  writing to the debugger console. This lets an automated front-end reuse the
+  debugger's own formatting - disassembly, register dumps, IOC/MEMC/VIDC state -
+  without duplicating any of it.*/
+static char *debug_capture_buf;
+static size_t debug_capture_pos, debug_capture_size;
+
+void debugger_capture_begin(char *buf, size_t size)
+{
+	debug_capture_buf = buf;
+	debug_capture_size = size;
+	debug_capture_pos = 0;
+	if (buf && size)
+		buf[0] = 0;
+}
+
+size_t debugger_capture_end(void)
+{
+	size_t len = debug_capture_pos;
+
+	debug_capture_buf = NULL;
+	debug_capture_size = debug_capture_pos = 0;
+	return len;
+}
+
 void debug_out(char *s)
 {
+	if (debug_capture_buf)
+	{
+		size_t len = strlen(s);
+
+		if (debug_capture_pos + len >= debug_capture_size)
+			len = (debug_capture_size > debug_capture_pos + 1) ? (debug_capture_size - debug_capture_pos - 1) : 0;
+		if (len)
+		{
+			memcpy(&debug_capture_buf[debug_capture_pos], s, len);
+			debug_capture_pos += len;
+		}
+		debug_capture_buf[debug_capture_pos] = 0;
+		return;
+	}
+
 	rpclog("%s", s);
 	console_output(s);
 }
+
+/*Optional non-interactive stop handler. When installed it replaces the
+  interactive REPL in debugger_do(), so that a breakpoint, watchpoint or trap
+  returns control to the front-end rather than blocking the emulation thread
+  waiting for console input.*/
+void (*debugger_stop_handler)(uint32_t pc) = NULL;
 
 
 int debug = 0;
@@ -532,6 +578,16 @@ void debugger_do()
 		if (debug_step_count)
 			return;
 	}
+	/*Automated front-ends take control here rather than entering the REPL.
+	  debug is cleared so that execution can be resumed by the front-end
+	  without immediately re-stopping on the same instruction.*/
+	if (debugger_stop_handler)
+	{
+		debug = 0;
+		debugger_stop_handler(pc);
+		return;
+	}
+
 	indebug = 1;
 	console_input_enable();
 	debug_disaddr = pc;
@@ -951,4 +1007,125 @@ void debugger_start_reset(void)
 void debugger_end_reset(void)
 {
 	debugger_in_reset = 0;
+}
+
+/*---------------------------------------------------------------------------
+  Programmatic interface.
+
+  The debugger's state is reachable only through its text command parser, which
+  is fine for a human at a console but not for an automated front-end. These
+  operate on the same arrays as the corresponding commands, so the two views
+  stay consistent.
+  ---------------------------------------------------------------------------*/
+
+static int breakpoint_set(int32_t *list, uint32_t addr)
+{
+	int c;
+
+	for (c = 0; c < 8; c++)
+	{
+		if (list[c] == (int32_t)addr)
+			return c;
+	}
+	for (c = 0; c < 8; c++)
+	{
+		if (list[c] == -1)
+		{
+			list[c] = (int32_t)addr;
+			return c;
+		}
+	}
+	return -1;
+}
+
+static int breakpoint_clear(int32_t *list, uint32_t addr)
+{
+	int c, found = 0;
+
+	for (c = 0; c < 8; c++)
+	{
+		if (list[c] == (int32_t)addr)
+		{
+			list[c] = -1;
+			found = 1;
+		}
+	}
+	return found;
+}
+
+int debugger_breakpoint_set(uint32_t addr)     { return breakpoint_set(breakpoints, addr & ~3); }
+int debugger_breakpoint_clear(uint32_t addr)   { return breakpoint_clear(breakpoints, addr & ~3); }
+int debugger_wbreakpoint_set(uint32_t addr)    { return breakpoint_set(write_breakpoints, addr & ~3); }
+int debugger_wbreakpoint_clear(uint32_t addr)  { return breakpoint_clear(write_breakpoints, addr & ~3); }
+int debugger_watchpoint_set(uint32_t addr)     { return breakpoint_set(write_watchpoints, addr & ~3); }
+int debugger_watchpoint_clear(uint32_t addr)   { return breakpoint_clear(write_watchpoints, addr & ~3); }
+
+void debugger_breakpoint_list(int32_t *out)    { memcpy(out, breakpoints, sizeof(breakpoints)); }
+void debugger_wbreakpoint_list(int32_t *out)   { memcpy(out, write_breakpoints, sizeof(write_breakpoints)); }
+void debugger_watchpoint_list(int32_t *out)    { memcpy(out, write_watchpoints, sizeof(write_watchpoints)); }
+
+void debugger_clear_all(void)
+{
+	int c;
+
+	for (c = 0; c < 8; c++)
+		breakpoints[c] = write_breakpoints[c] = write_watchpoints[c] = -1;
+	debug_trap_enable = 0;
+	debug_step_count = 0;
+}
+
+/*True if anything is armed that requires the per-instruction debugger hook.
+  The caller uses this to decide whether debugon needs to be set, since leaving
+  it on costs an extra test per instruction.*/
+int debugger_any_armed(void)
+{
+	int c;
+
+	for (c = 0; c < 8; c++)
+	{
+		if (breakpoints[c] != -1 || write_breakpoints[c] != -1 || write_watchpoints[c] != -1)
+			return 1;
+	}
+	return debug_trap_enable != 0;
+}
+
+void debugger_trap_set(int trap, int enable)
+{
+	if (trap < 0 || trap > DEBUG_TRAP_SWI)
+		return;
+	if (enable)
+		debug_trap_enable |= (1u << trap);
+	else
+		debug_trap_enable &= ~(1u << trap);
+}
+
+uint32_t debugger_trap_mask(void)
+{
+	return debug_trap_enable;
+}
+
+/*Arm a single-step of n instructions. debug must also be set so that
+  debugger_do() reaches the step counter.*/
+void debugger_step(int count)
+{
+	debug = 1;
+	debug_step_count = (count < 1) ? 1 : count;
+}
+
+/*Disassemble count instructions starting at addr into buf, reusing the
+  debugger's own formatter.*/
+void debugger_disassemble(uint32_t addr, int count, char *buf, size_t size)
+{
+	uint32_t saved = debug_disaddr;
+	int c;
+
+	debug_disaddr = addr;
+	debugger_capture_begin(buf, size);
+	for (c = 0; c < count; c++)
+	{
+		debug_disassemble();
+		debug_out("\n");
+	}
+	debugger_capture_end();
+	debug_disaddr = saved;
 }

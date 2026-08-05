@@ -819,10 +819,19 @@ void loadconfig()
 	support_rom_enabled = config_get_int(CFG_MACHINE, NULL, "support_rom_enabled", 1);
 }
 
+/*Cleared by front-ends that must not leave anything behind - an automated
+  session should not rewrite the user's arc.cfg, the machine .cfg or the CMOS
+  image, both because those are inputs it was handed and because writing them
+  would make an otherwise reproducible run depend on what ran before it.*/
+int config_persist_enabled = 1;
+
 void saveconfig()
 {
 	char config_file[512];
 	int c;
+
+	if (!config_persist_enabled)
+		return;
 
 	append_filename(config_file, exname, "arc.cfg", 511);
 

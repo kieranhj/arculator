@@ -16,3 +16,6 @@ extern void cache_write_timing(uint32_t addr, int is_n_cycle);
 extern uint32_t rotatelookup[4096];
 
 void recalc_min_timer(void);
+
+/*Abandon the rest of the current execarm() slice - see arm.c*/
+void arm_break_execution(void);

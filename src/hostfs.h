@@ -25,6 +25,9 @@ extern void hostfs(ARMul_State *state);
 extern void hostfs_init(void);
 extern void hostfs_reset(void);
 
+/* If set before hostfs_init(), used in place of <exe>/hostfs */
+extern char hostfs_root_override[512];
+
 static inline uint32_t ARMul_LoadWordS(ARMul_State *state, ARMword address)
 {
 	return readmeml(address);

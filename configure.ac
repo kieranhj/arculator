@@ -64,6 +64,16 @@ else
 fi
 AM_CONDITIONAL(RELEASE_BUILD, [test "$enable_release_build" = "yes"])
 
+AC_MSG_CHECKING([whether to build the headless control binary])
+AC_ARG_ENABLE(headless,
+          AS_HELP_STRING([--enable-headless],[build arculator-headless, a windowless build driven over a control socket]))
+if test "$enable_headless" = "yes"; then
+   AC_MSG_RESULT([yes])
+else
+   AC_MSG_RESULT([no])
+fi
+AM_CONDITIONAL(BUILD_HEADLESS, [test "$enable_headless" = "yes"])
+
 AC_MSG_CHECKING([for libz])
 AC_CHECK_LIB(z, inflateEnd, [], \
           [echo "You need to install the Zlib library."

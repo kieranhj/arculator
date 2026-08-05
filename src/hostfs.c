@@ -2088,12 +2088,21 @@ hostfs_register(ARMul_State *state)
 /**
  * Initialise HostFS module. Called on program startup.
  */
+/* When non-empty, overrides the default <exe>/hostfs location. Lets an
+   automated front-end give each session its own isolated sandbox. */
+char hostfs_root_override[512];
+
 void
 hostfs_init(void)
 {
   int c;
 
-  append_filename(HOSTFS_ROOT, exname, "hostfs", sizeof(HOSTFS_ROOT));
+  if (hostfs_root_override[0]) {
+    strncpy(HOSTFS_ROOT, hostfs_root_override, sizeof(HOSTFS_ROOT) - 1);
+    HOSTFS_ROOT[sizeof(HOSTFS_ROOT) - 1] = 0;
+  } else {
+    append_filename(HOSTFS_ROOT, exname, "hostfs", sizeof(HOSTFS_ROOT));
+  }
   for (c = 0; c < 511; c++) {
     if (HOSTFS_ROOT[c] == '\\') {
       HOSTFS_ROOT[c] = '/';

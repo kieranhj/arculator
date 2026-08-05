@@ -1196,6 +1196,16 @@ static void exception(uint32_t vector, int new_mode, int pc_offset)
 
 static int64_t total_cycles;
 
+/*Abandon the remainder of the current execarm() slice. Used by automated
+  front-ends to unwind out of the interpreter as soon as a breakpoint or
+  watchpoint fires, so that control returns without executing further
+  instructions. The loop condition is re-tested after the per-instruction
+  cycle cost is subtracted, so zeroing the budget here always terminates it.*/
+void arm_break_execution(void)
+{
+	total_cycles = 0;
+}
+
 typedef void (*OpFn)(uint32_t opcode);
 
 static void opNULL(uint32_t opcode)

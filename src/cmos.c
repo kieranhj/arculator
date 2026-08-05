@@ -113,6 +113,9 @@ void cmos_save()
 	char cmos_name[512];
 	FILE *cmosf;
 
+	if (!config_persist_enabled)
+		return;
+
 	LOG_CMOS("Writing CMOS %i\n", romset);
 	snprintf(cmos_name, sizeof(cmos_name), "cmos/%s.%s.cmos.bin", machine_config_name, config_get_cmos_name(romset, fdctype));
 	append_filename(fn, exname, cmos_name, 511);

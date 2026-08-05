@@ -86,4 +86,7 @@ extern char joystick_if[16];
 extern char _5th_column_fn[512];
 extern int support_rom_enabled;
 
+/*When zero, saveconfig() and cmos_save() do nothing - see config.c*/
+extern int config_persist_enabled;
+
 int machine_is_a500(void);
