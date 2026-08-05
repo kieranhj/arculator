@@ -89,6 +89,12 @@ static int32_t write_watchpoints[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 static int debug_step_count = 0;
 static uint32_t debug_trap_enable = 0;
 
+/*Address execution was stopped at by a non-interactive front-end, so that
+  resuming does not immediately stop again on the same breakpoint. No valid
+  26-bit PC can take this value.*/
+#define DEBUG_NO_RESUME_PC 0xffffffff
+static uint32_t debug_resume_pc = DEBUG_NO_RESUME_PC;
+
 #define RD ((opcode>>12)&0xF)
 #define RN ((opcode>>16)&0xF)
 #define RM (opcode&0xF)
@@ -560,13 +566,23 @@ void debugger_do()
 	if (debugger_in_reset)
 		return;
 
-	for (c = 0; c < 8; c++)
+	if (pc == debug_resume_pc)
 	{
-		if (breakpoints[c] == pc)
+		/*Execution was stopped here and is now being resumed. Let the
+		  instruction through rather than re-triggering the breakpoint that
+		  stopped it, which would otherwise never make progress.*/
+		debug_resume_pc = DEBUG_NO_RESUME_PC;
+	}
+	else
+	{
+		for (c = 0; c < 8; c++)
 		{
-			debug = 1;
-			sprintf(outs, "    Break at %07X\n", (PC-8));
-			debug_out(outs);
+			if (breakpoints[c] == pc)
+			{
+				debug = 1;
+				sprintf(outs, "    Break at %07X\n", (PC-8));
+				debug_out(outs);
+			}
 		}
 	}
 	if (!debug)
@@ -584,6 +600,8 @@ void debugger_do()
 	if (debugger_stop_handler)
 	{
 		debug = 0;
+		debug_step_count = 0;
+		debug_resume_pc = pc;
 		debugger_stop_handler(pc);
 		return;
 	}
@@ -1003,6 +1021,8 @@ void debugger_do()
 void debugger_start_reset(void)
 {
 	debugger_in_reset = 1;
+	/*The pre-reset PC means nothing after the machine restarts.*/
+	debug_resume_pc = DEBUG_NO_RESUME_PC;
 }
 void debugger_end_reset(void)
 {
@@ -1072,6 +1092,8 @@ void debugger_clear_all(void)
 		breakpoints[c] = write_breakpoints[c] = write_watchpoints[c] = -1;
 	debug_trap_enable = 0;
 	debug_step_count = 0;
+	debug_resume_pc = DEBUG_NO_RESUME_PC;
+	debug = 0;
 }
 
 /*True if anything is armed that requires the per-instruction debugger hook.
@@ -1105,11 +1127,17 @@ uint32_t debugger_trap_mask(void)
 }
 
 /*Arm a single-step of n instructions. debug must also be set so that
-  debugger_do() reaches the step counter.*/
+  debugger_do() reaches the step counter.
+
+  The count is one higher than the number of instructions to execute: the
+  counter is decremented on entry to debugger_do(), i.e. before the
+  instruction runs, and a stop handler halts before execution rather than
+  after it. So to execute n instructions the stop must land on the
+  (n+1)th hook.*/
 void debugger_step(int count)
 {
 	debug = 1;
-	debug_step_count = (count < 1) ? 1 : count;
+	debug_step_count = ((count < 1) ? 1 : count) + (debugger_stop_handler ? 1 : 0);
 }
 
 /*Disassemble count instructions starting at addr into buf, reusing the

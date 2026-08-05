@@ -52,3 +52,8 @@
 # Disc and hard disc images
 *.hdf
 HardImage[0-9]*
+
+# MCP server scratch output
+/mcp/tests/out/
+__pycache__/
+*.pyc

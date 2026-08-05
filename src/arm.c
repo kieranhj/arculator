@@ -1196,14 +1196,17 @@ static void exception(uint32_t vector, int new_mode, int pc_offset)
 
 static int64_t total_cycles;
 
+/*Set by arm_break_execution() and consumed at the debugger hook in execarm().*/
+static int break_requested;
+
 /*Abandon the remainder of the current execarm() slice. Used by automated
-  front-ends to unwind out of the interpreter as soon as a breakpoint or
-  watchpoint fires, so that control returns without executing further
-  instructions. The loop condition is re-tested after the per-instruction
-  cycle cost is subtracted, so zeroing the budget here always terminates it.*/
+  front-ends to unwind out of the interpreter the moment a breakpoint fires,
+  so that execution stops *before* the instruction at the breakpoint runs and
+  the front-end sees the machine state the breakpoint was set to inspect.*/
 void arm_break_execution(void)
 {
 	total_cycles = 0;
+	break_requested = 1;
 }
 
 typedef void (*OpFn)(uint32_t opcode);
@@ -2668,7 +2671,24 @@ void execarm(int cycles_to_execute)
 		if (!prefabort)
 		{
 			if (debugon)
+			{
 				debugger_do();
+
+				/*A non-interactive front-end asked to stop here. Unwind
+				  before the instruction executes, rewinding the pipeline
+				  by one stage so that it is re-issued when execution
+				  resumes: the next iteration will shift opcode2 back into
+				  opcode and refetch opcode3 from the unchanged PC. Leaving
+				  armregs[15] alone is what keeps PC-8 pointing at the
+				  stopped instruction.*/
+				if (break_requested)
+				{
+					break_requested = 0;
+					opcode3 = opcode2;
+					opcode2 = opcode;
+					break;
+				}
+			}
 
 			if (flaglookup[opcode >> 28][armregs[15] >> 28])
 				opcode_fns[(opcode >> 20) & 0xff](opcode);
