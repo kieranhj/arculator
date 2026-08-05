@@ -438,11 +438,11 @@ void slirp_select_poll(fd_set *readfds, fd_set *writefds, fd_set *xfds)
 			    /* Connected */
 			    so->so_state &= ~SS_ISFCONNECTING;
 			    
-			    //ret = send(so->s, &ret, 0, 0);
+			    //ret = send(so->s, (const char *)&ret, 0, 0);
 			    //winsock2.h:549:32: note: expected 'const char *' but argument is of type 'int *'
 			    //WINSOCK_API_LINKAGE int PASCAL send(SOCKET,const char*,int,int);		JASON
 			    //ret = send(so->s, "a", 1, 0);		WHY THE HELL WAS THIS HERE?!
-			    ret = send(so->s, &ret, 0, 0);		//This is what it should be.
+			    ret = send(so->s, (const char *)&ret, 0, 0);		//This is what it should be.
 			    if (ret < 0) {
 			      /* XXXXX Must fix, zero bytes is a NOP */
 			      if (errno == EAGAIN || errno == EWOULDBLOCK ||
@@ -488,7 +488,7 @@ void slirp_select_poll(fd_set *readfds, fd_set *writefds, fd_set *xfds)
 			    
 			    /* tcp_input will take care of it */
 			  } else {
-			    ret = send(so->s, &ret, 0,0);
+			    ret = send(so->s, (const char *)&ret, 0,0);
 			    if (ret < 0) {
 			      /* XXX */
 			      if (errno == EAGAIN || errno == EWOULDBLOCK ||
