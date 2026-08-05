@@ -64,6 +64,7 @@ dependencies (wx, SDL2, zlib, libstdc++, libpcap) resolve from there.
 - `--enable-debug` — `-O0 -g -D_DEBUG -DDEBUG_LOG`.
 - `--disable-podules` — skip the external podule shared libraries.
 - `--enable-wx-main-window` — defines `UI_WX`; see "UI variants" below.
+- `--enable-headless` — additionally build `arculator-headless`, a windowless binary driven over a control socket; see "Headless build" below.
 
 Requires SDL2 ≥ 2.0.1, wxWidgets ≥ 3.0, zlib, X11 (non-Windows), ALSA (Linux, for podules).
 
@@ -83,7 +84,23 @@ Three mutually exclusive main-window builds, selected in `src/Makefile.am`:
 | Unix, default | `input_sdl2.c video_sdl2.c wx-sdl2.c` | Emulated screen is its own SDL window; wx used only for dialogs; menu is a right-click popup |
 | Unix, `--enable-wx-main-window` | `input_wx.c video_wx.c wx-mainwindow.cc` | Screen is a wx canvas with a real `wxMenuBar` |
 
-`wx-sdl2.c` and `wx-mainwindow.cc` define the *same* `arc_*` symbols (`arc_start_main_thread`, `arc_disc_change`, `arc_set_display_mode`, …, declared in `arc.h`). That `arc_*` set is the emulator↔UI boundary; changes to one implementation almost always need mirroring in the other.
+`wx-sdl2.c` and `wx-mainwindow.cc` define the *same* `arc_*` symbols (`arc_start_main_thread`, `arc_disc_change`, `arc_set_display_mode`, …, declared in `arc.h`). That `arc_*` set is the emulator↔UI boundary; changes to one implementation almost always need mirroring in the other — and in `headless_main.c`, below.
+
+## Headless build
+
+`--enable-headless` builds a second binary, `arculator-headless`, from the same emulation core with `headless_video.c`/`headless_input.c`/`headless_sound.c` in place of the SDL platform backends, and no wxWidgets at all. `headless_main.c` is the third `arc_*` implementation. It exists to be driven by the MCP server in `mcp/` — see `mcp/README.md`.
+
+Two things differ from the interactive front-ends and are deliberate:
+
+- **Single threaded, in lockstep with the controller.** There is no emulation thread and no `main_thread_mutex`; a control command is serviced, the machine is advanced by an explicit cycle count, and the result is reported. Nothing runs between commands. This is what makes a session reproducible, and it is why the `indebug` mutex dance does not appear in `headless_main.c`.
+- **No persistence.** `config_persist_enabled` is cleared, so `saveconfig()` and `cmos_save()` do nothing. Otherwise a session would rewrite the `.cfg` and CMOS images it was handed, and runs would depend on what ran before them. `--persist` restores the normal behaviour.
+
+The hooks it needed in shared code are small, and worth knowing about because they change debugger behaviour for *any* non-interactive caller:
+
+- `arm_break_execution()` (`arm.c`) zeroes the `execarm()` cycle budget **and** makes the loop break at the debugger hook, rewinding the 3-stage pipeline by one so the un-executed instruction is re-issued on resume. This is what makes a breakpoint stop *before* its instruction executes. The interactive REPL never needed it because it blocks inside `debugger_do()`.
+- `debugger_stop_handler` (`debugger.c`), when installed, replaces the interactive REPL. `debug_resume_pc` stops a resume from immediately re-triggering the breakpoint it just stopped on.
+- `debugger_capture_begin/end()` redirects `debug_out()` into a buffer, which is how the headless build reuses the debugger's disassembler and register/IOC/MEMC/VIDC formatting rather than duplicating it. Anything reachable from a `debug_out()` call is available this way.
+- `hostfs_root_override` (`hostfs.c`) replaces the fixed `<exe>/hostfs` so each session gets its own sandbox.
 
 ## Architecture
 
