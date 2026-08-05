@@ -168,6 +168,7 @@ def run_until_break(machine_id: str, max_ms: int = 5000,
     machine = pool.get(machine_id)
     elapsed = 0
     messages = []
+    result = machine.command_json("run 0")   # a no-op run, for a baseline
     while elapsed < max_ms:
         step = min(chunk_ms, max_ms - elapsed)
         result = machine.command_json(f"run_us {step * 1000}")
