@@ -20,6 +20,7 @@ from mcp.server.mcpserver import MCPServer, Image
 from . import keys as keymap
 from . import png
 from .client import EmulatorError, MachinePool
+from .symbols import SymbolTable
 
 DEFAULT_CONFIG = "a3000-riscos311"
 
@@ -192,10 +193,22 @@ def run_until_break(machine_id: str, max_ms: int = 5000,
 
 @mcp.tool()
 def read_registers(machine_id: str) -> dict:
-    """Read ARM registers, PSR flags, processor mode and the cycle count."""
-    regs = pool.get(machine_id).command_json("regs")
+    """Read ARM registers, PSR flags, processor mode and the cycle count.
+
+    If symbols are loaded, the PC is also reported symbolically.
+    """
+    machine = pool.get(machine_id)
+    regs = machine.command_json("regs")
     regs["r_hex"] = [f"&{v:08X}" for v in regs["r"]]
     regs["pc_hex"] = f"&{regs['pc']:07X}"
+
+    table = _symbols(machine)
+    if table.addresses:
+        regs["pc_symbol"] = table.format_address(regs["pc"])
+        # R14 is the link register; naming it says who called this code.
+        hit = table.name_for(regs["r"][14] & 0x3FFFFFC)
+        if hit:
+            regs["lr_symbol"] = table.format_address(regs["r"][14] & 0x3FFFFFC)
     return regs
 
 
@@ -207,7 +220,8 @@ def read_memory(machine_id: str, address: str, length: int,
     Returns hex by default; as_text also decodes the bytes as Latin-1 with
     non-printables shown as '.', which is handy for finding strings.
     """
-    data = pool.get(machine_id).command(f"read {_hex(address)} {length:x}")
+    machine = pool.get(machine_id)
+    data = machine.command(f"read {_hex(address, machine)} {length:x}")
     out = {"address": address, "length": len(data), "hex": data.hex()}
     if as_text:
         out["text"] = "".join(
@@ -219,16 +233,26 @@ def read_memory(machine_id: str, address: str, length: int,
 def write_memory(machine_id: str, address: str, data_hex: str) -> str:
     """Write bytes to guest memory. data_hex is a plain hex string."""
     cleaned = data_hex.replace(" ", "").replace("\n", "")
-    written = pool.get(machine_id).command_text(
-        f"write {_hex(address)} {cleaned}")
+    machine = pool.get(machine_id)
+    written = machine.command_text(
+        f"write {_hex(address, machine)} {cleaned}")
     return f"wrote {written} bytes at {address}"
 
 
 @mcp.tool()
-def disassemble(machine_id: str, address: str, count: int = 16) -> str:
-    """Disassemble ARM instructions, using the emulator's own disassembler."""
-    return pool.get(machine_id).command_text(
-        f"dis {_hex(address)} {count}")
+def disassemble(machine_id: str, address: str, count: int = 16,
+                symbolise: bool = True) -> str:
+    """Disassemble ARM instructions, using the emulator's own disassembler.
+
+    `address` may be a symbol name, name+offset, or hex. With symbols loaded,
+    instruction addresses and branch targets are annotated with names.
+    """
+    machine = pool.get(machine_id)
+    text = machine.command_text(f"dis {_hex(address, machine)} {count}")
+    table = _symbols(machine)
+    if symbolise and table.addresses:
+        text = table.annotate(text)
+    return text
 
 
 @mcp.tool()
@@ -241,27 +265,112 @@ def dump_chip_state(machine_id: str, chip: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Symbols
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def load_symbols(machine_id: str, path: str, format: str | None = None) -> dict:
+    """Load a symbol file so addresses can be named and names used as addresses.
+
+    Understands three things a vasm/vlink build produces, and guesses which is
+    which from the contents:
+
+      vlink -vicelabels <f>   VICE labels. Best source of code labels; prefer it.
+      vlink -M<f>             Link map: sections plus abs/reloc symbols.
+      vasm -L<f>              Assembler listing.
+
+    Symbols are classified into addresses and constants, because a build
+    defines hundreds of .equ constants that would otherwise poison address
+    lookup. Both kinds resolve by name; only addresses are used to name an
+    address. Call repeatedly to merge several files.
+    """
+    machine = pool.get(machine_id)
+    table = _symbols(machine)
+    try:
+        loaded = table.load(path, fmt=format)
+    except FileNotFoundError:
+        raise EmulatorError(f"no symbol file at {path}")
+    except ValueError as e:
+        raise EmulatorError(str(e))
+    stats = table.stats()
+    return {"loaded": loaded, "totals": {k: stats[k] for k in
+                                         ("total", "addresses", "constants")}}
+
+
+@mcp.tool()
+def lookup_symbol(machine_id: str, query: str) -> dict:
+    """Resolve a name to an address, or an address to the nearest symbol.
+
+    Accepts a symbol name, name+offset, or a hex address.
+    """
+    machine = pool.get(machine_id)
+    table = _symbols(machine)
+    if not table.by_name:
+        raise EmulatorError("no symbols loaded; call load_symbols first")
+
+    value = table.resolve(query)
+    if value is None:
+        raise EmulatorError(
+            f"{query!r} is neither a known symbol nor a hex address")
+
+    out = {"query": query, "address": value, "address_hex": f"&{value:07X}"}
+    if query in table.by_name:
+        out["kind"] = table.by_name[query].kind
+    hit = table.name_for(value)
+    if hit:
+        out["nearest"] = hit[0]
+        out["offset"] = hit[1]
+        out["formatted"] = table.format_address(value)
+    return out
+
+
+@mcp.tool()
+def list_symbols(machine_id: str, pattern: str = "", limit: int = 100,
+                 addresses_only: bool = True) -> dict:
+    """List loaded symbols, optionally filtered by a substring of the name."""
+    machine = pool.get(machine_id)
+    table = _symbols(machine)
+    if not table.by_name:
+        raise EmulatorError("no symbols loaded; call load_symbols first")
+
+    needle = pattern.lower()
+    matches = [s for s in table.by_name.values()
+               if needle in s.name.lower()
+               and (s.kind == "address" or not addresses_only)]
+    matches.sort(key=lambda s: s.value)
+    return {
+        "matched": len(matches),
+        "shown": min(len(matches), limit),
+        "symbols": [{"name": s.name, "address": f"&{s.value:07X}",
+                     "kind": s.kind} for s in matches[:limit]],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Debugging
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
 def set_breakpoint(machine_id: str, address: str) -> str:
     """Break when the PC reaches `address`. Eight slots are available."""
-    slot = pool.get(machine_id).command_text(f"bp add {_hex(address)}")
+    machine = pool.get(machine_id)
+    slot = machine.command_text(f"bp add {_hex(address, machine)}")
     return f"breakpoint at {address} in slot {slot}"
 
 
 @mcp.tool()
 def clear_breakpoint(machine_id: str, address: str) -> str:
     """Remove an execution breakpoint."""
-    found = pool.get(machine_id).command_text(f"bp del {_hex(address)}")
+    machine = pool.get(machine_id)
+    found = machine.command_text(f"bp del {_hex(address, machine)}")
     return "cleared" if found == "1" else f"no breakpoint at {address}"
 
 
 @mcp.tool()
 def set_write_breakpoint(machine_id: str, address: str) -> str:
     """Break when the guest writes to `address`."""
-    slot = pool.get(machine_id).command_text(f"wbp add {_hex(address)}")
+    machine = pool.get(machine_id)
+    slot = machine.command_text(f"wbp add {_hex(address, machine)}")
     return f"write breakpoint at {address} in slot {slot}"
 
 
@@ -271,7 +380,8 @@ def set_watchpoint(machine_id: str, address: str) -> str:
 
     Hits appear in the `messages` field of the next run result.
     """
-    slot = pool.get(machine_id).command_text(f"wp add {_hex(address)}")
+    machine = pool.get(machine_id)
+    slot = machine.command_text(f"wp add {_hex(address, machine)}")
     return f"watchpoint at {address} in slot {slot}"
 
 
@@ -568,9 +678,27 @@ def save_sound_capture(machine_id: str, path: str) -> str:
 
 # ---------------------------------------------------------------------------
 
-def _hex(value):
-    """Normalise a user-supplied address to bare hex."""
+def _symbols(machine):
+    """The symbol table for a machine, created on first use."""
+    table = getattr(machine, "symbols", None)
+    if table is None:
+        table = SymbolTable()
+        machine.symbols = table
+    return table
+
+
+def _hex(value, machine=None):
+    """Normalise an address to bare hex, resolving symbol names if loaded.
+
+    Accepts 8000, &8000, 0x8000, a symbol name, or name+offset.
+    """
     text = str(value).strip()
+
+    if machine is not None:
+        resolved = _symbols(machine).resolve(text)
+        if resolved is not None:
+            return f"{resolved & 0xffffffff:x}"
+
     for prefix in ("&", "0x", "0X"):
         if text.startswith(prefix):
             text = text[len(prefix):]
@@ -578,8 +706,13 @@ def _hex(value):
     try:
         int(text, 16)
     except ValueError:
+        known = ""
+        if machine is not None and _symbols(machine).by_name:
+            known = (f" No symbol of that name is loaded either "
+                     f"({len(_symbols(machine).by_name)} are).")
         raise EmulatorError(
-            f"{value!r} is not a hex address (try 8000, &8000 or 0x8000)")
+            f"{value!r} is not a hex address (try 8000, &8000 or 0x8000)."
+            + known)
     return text
 
 
