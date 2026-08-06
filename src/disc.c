@@ -243,16 +243,22 @@ void disc_poll(void *p)
 		timer_advance_u64(&disc_timer, disc_poll_time >> 4);
 	else
 		timer_advance_u64(&disc_timer, disc_poll_time);
-	if (drive_funcs[disc_drivesel])
+	if (drive_funcs[disc_drivesel] && drive_funcs[disc_drivesel]->poll)
+		drive_funcs[disc_drivesel]->poll();
+
+	/*This countdown must run whether or not a disc is present. disc_notfound
+	  is only ever armed by disc_readsector()/writesector()/readaddress()/
+	  format() in their *no disc* branch, so gating it on drive_funcs being
+	  non-NULL meant the timeout could never expire in the one case it exists
+	  for, and the controller was left waiting for a completion that never
+	  came. The WD1772 masks this because it also times out on its own index
+	  pulse counter; the 82C711 has no such fallback, so an empty drive hangs
+	  it - and with it any machine configured for one, such as an A3020.*/
+	if (disc_notfound)
 	{
-		if (drive_funcs[disc_drivesel]->poll)
-			drive_funcs[disc_drivesel]->poll();
-		if (disc_notfound)
-		{
-			disc_notfound--;
-			if (!disc_notfound)
-				fdc_funcs->notfound(fdc_p);
-		}
+		disc_notfound--;
+		if (!disc_notfound && fdc_funcs && fdc_funcs->notfound)
+			fdc_funcs->notfound(fdc_p);
 	}
 }
 
