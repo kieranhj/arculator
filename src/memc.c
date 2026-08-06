@@ -271,6 +271,37 @@ void memc_debug_print(char *s)
 		   spos, ssend);
 }
 
+/*Machine-readable form of memc_debug_print(), for automated front-ends.
+  The DMA pointers are the interesting part for demo work: comparing the
+  register values against the current ones shows how far through the frame
+  or the sound buffer the DMA has got.*/
+int memc_get_state_json(char *s, size_t len)
+{
+	return snprintf(s, len,
+		"{\"control\":%u,"
+		"\"page_size\":\"%s\",\"page_size_bytes\":%i,"
+		"\"rom_speed_low\":\"%s\",\"rom_speed_high\":\"%s\","
+		"\"dram_refresh\":\"%s\","
+		"\"video_dma\":%s,\"sound_dma\":%s,\"os_mode\":%s,"
+		"\"registers\":{\"vinit\":%u,\"vstart\":%u,\"vend\":%u,"
+		"\"cinit\":%u,\"sstart\":%u,\"send\":%u},"
+		"\"current\":{\"vaddr\":%u,\"caddr\":%u,\"saddr\":%u,\"send\":%u},"
+		"\"memory_kb\":%i}",
+		memctrl,
+		page_sizes[pagesize], 4096 << pagesize,
+		rom_speeds[(memctrl >> 4) & 3],
+		rom_speeds[(memctrl >> 6) & 3],
+		refresh_modes[(memctrl >> 8) & 3],
+		(memctrl & (1 << 10)) ? "true" : "false",
+		(memctrl & (1 << 11)) ? "true" : "false",
+		(memctrl & (1 << 12)) ? "true" : "false",
+		vinit << 2, vstart << 2, vend << 2, cinit << 2,
+		sstart << 2, sendN << 2,
+		vidc_get_current_vaddr() << 2, vidc_get_current_caddr() << 2,
+		spos, ssend,
+		memsize);
+}
+
 void memc_debug_print_cam(void)
 {
 	int nr_memcs = memsize / 4096;

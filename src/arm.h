@@ -19,3 +19,13 @@ void recalc_min_timer(void);
 
 /*Abandon the rest of the current execarm() slice - see arm.c*/
 void arm_break_execution(void);
+
+/*Execution profiler - see arm.c. Counts and cycle costs are accumulated per
+  word over [arm_profile_base, arm_profile_base + arm_profile_words*4).
+  Profiling is off while arm_profile_counts is NULL.*/
+extern uint32_t *arm_profile_counts;
+extern uint64_t *arm_profile_cycles;
+extern uint32_t arm_profile_base;
+extern uint32_t arm_profile_words;
+extern uint64_t arm_profile_total_cycles;
+extern uint64_t arm_profile_total_instructions;

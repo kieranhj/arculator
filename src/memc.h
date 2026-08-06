@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 void initmemc();
 
 extern int memc_videodma_enable;
@@ -23,3 +25,6 @@ extern uint64_t memc_dma_cursor_req_ts;
 
 void memc_debug_print(char *s);
 void memc_debug_print_cam(void);
+
+/*Machine-readable state, for automated front-ends*/
+int memc_get_state_json(char *s, size_t len);

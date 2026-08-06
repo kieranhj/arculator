@@ -1199,6 +1199,21 @@ static int64_t total_cycles;
 /*Set by arm_break_execution() and consumed at the debugger hook in execarm().*/
 static int break_requested;
 
+/*Execution profiler. Counts and cycle costs are accumulated per word of a
+  caller-chosen address range. Cycles matter more than instruction counts on
+  this machine: the same instruction costs wildly different amounts depending
+  on whether it hits ROM, DRAM in a page or DRAM out of one, and on how much
+  the video DMA is stealing, so a hit count alone hides where the time goes.
+
+  When arm_profile_counts is NULL - the normal case - this costs one
+  predictable, never-taken branch per instruction.*/
+uint32_t *arm_profile_counts;
+uint64_t *arm_profile_cycles;
+uint32_t arm_profile_base;
+uint32_t arm_profile_words;
+uint64_t arm_profile_total_cycles;
+uint64_t arm_profile_total_instructions;
+
 /*Abandon the remainder of the current execarm() slice. Used by automated
   front-ends to unwind out of the interpreter the moment a breakpoint fires,
   so that execution stops *before* the instruction at the breakpoint runs and
@@ -2642,6 +2657,7 @@ void execarm(int cycles_to_execute)
 //                LOG_VIDC_TIMING("cycles (%d) += vidcgetcycs() (%d) --> %d (%d) to execute before pollline()\n",
 //                        oldcyc, vidc_cycles_to_execute, 0, 0);
 		uint64_t oldcyc = tsc;
+		uint32_t profile_index = 0xffffffff;
 
 		opcode = opcode2;
 		opcode2 = opcode3;
@@ -2687,6 +2703,18 @@ void execarm(int cycles_to_execute)
 					opcode3 = opcode2;
 					opcode2 = opcode;
 					break;
+				}
+			}
+
+			if (arm_profile_counts)
+			{
+				uint32_t index = (((PC - 8) & 0x3fffffc) - arm_profile_base) >> 2;
+
+				if (index < arm_profile_words)
+				{
+					profile_index = index;
+					arm_profile_counts[index]++;
+					arm_profile_total_instructions++;
 				}
 			}
 
@@ -2759,6 +2787,17 @@ void execarm(int cycles_to_execute)
 
 		if (TIMER_VAL_LESS_THAN_VAL(timer_target, tsc >> 32))
 			timer_process();
+
+		/*Charge this instruction's real cost - fetch, memory waits and any
+		  DMA stolen from it - to the address it was fetched from. tsc is
+		  32:32 fixed point, so shift to whole cycles.*/
+		if (profile_index != 0xffffffff)
+		{
+			uint64_t cost = (tsc - oldcyc) >> 32;
+
+			arm_profile_cycles[profile_index] += cost;
+			arm_profile_total_cycles += cost;
+		}
 
 		total_cycles -= (tsc - oldcyc);
 

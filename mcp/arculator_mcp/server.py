@@ -257,11 +257,39 @@ def disassemble(machine_id: str, address: str, count: int = 16,
 
 @mcp.tool()
 def dump_chip_state(machine_id: str, chip: str) -> str:
-    """Dump peripheral state. chip is ioc, memc, memc_cam or vidc.
+    """Dump peripheral state as text. chip is ioc, memc, memc_cam or vidc.
 
-    memc_cam lists the MMU's logical-to-physical page mappings.
+    memc_cam lists the MMU's logical-to-physical page mappings. For VIDC and
+    MEMC prefer read_video_state / read_memc_state, which return structured
+    values instead of a formatted dump.
     """
     return pool.get(machine_id).command_text(f"dump {chip}")
+
+
+@mcp.tool()
+def read_video_state(machine_id: str) -> dict:
+    """Read the current VIDC video mode, timing and palette.
+
+    Reports the derived mode - resolution, bpp, frame rate, pixel clock - as
+    well as the raw horizontal and vertical timing registers, the cursor
+    position, the sound sample rate and the live DMA pointers. Use it to
+    assert what mode a demo actually set, or to check raster timing:
+    `timing.current_line` is the scanline VIDC is drawing right now, and
+    `in_display` says whether it is in the visible area or in blanking.
+    """
+    return pool.get(machine_id).command_json("dump vidc_json")
+
+
+@mcp.tool()
+def read_memc_state(machine_id: str) -> dict:
+    """Read MEMC configuration and DMA state.
+
+    Page size, ROM speeds, DRAM refresh mode, whether video and sound DMA are
+    enabled, and both the programmed DMA pointers (vinit/vstart/vend/cinit/
+    sstart/send) and the live ones. Comparing programmed against current shows
+    how far through the screen or sound buffer the DMA has reached.
+    """
+    return pool.get(machine_id).command_json("dump memc_json")
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +443,83 @@ def set_trap(machine_id: str, trap: str, enabled: bool = True) -> str:
     """
     return pool.get(machine_id).command_text(
         f"trap {trap} {1 if enabled else 0}")
+
+
+# ---------------------------------------------------------------------------
+# Profiling
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def profile_start(machine_id: str, address: str = "8000",
+                  length: str = "10000") -> dict:
+    """Start cycle-accurate profiling over an address range.
+
+    Accumulates an execution count and a cycle cost per instruction word.
+    Cycles are what matter on this machine: the same instruction costs very
+    different amounts depending on whether it hits ROM, DRAM in page or out of
+    page, and on how much the video DMA is stealing from the CPU, so a hit
+    count alone hides where the time goes.
+
+    `address` and `length` are hex, and `address` may be a symbol name. The
+    default covers 64KB from the standard &8000 load address. Profiling costs
+    roughly one branch per instruction while running.
+    """
+    machine = pool.get(machine_id)
+    result = machine.command_json(
+        f"profile start {_hex(address, machine)} {_hex(length, machine)}")
+    return {
+        "base": f"&{result['base']:07X}",
+        "words": result["words"],
+        "bytes_covered": result["words"] * 4,
+    }
+
+
+@mcp.tool()
+def profile_stop(machine_id: str) -> str:
+    """Stop profiling and release its buffers."""
+    return pool.get(machine_id).command_text("profile stop")
+
+
+@mcp.tool()
+def profile_read(machine_id: str, top: int = 32,
+                 symbolise: bool = True) -> dict:
+    """Read the hottest addresses by cycle cost, without stopping profiling.
+
+    Returns the top N instruction words ranked by total cycles, each with its
+    execution count and its mean cycles per execution. With symbols loaded,
+    addresses are named. Totals let you work out what share of the run each
+    entry accounts for.
+    """
+    machine = pool.get(machine_id)
+    raw = machine.command_json(f"profile read {top}")
+    table = _symbols(machine)
+
+    entries = []
+    total = raw["total_cycles"] or 1
+    for e in raw["entries"]:
+        item = {
+            "address": f"&{e['addr']:07X}",
+            "count": e["count"],
+            "cycles": e["cycles"],
+            "percent": round(100.0 * e["cycles"] / total, 2),
+            "mean_cycles": round(e["cycles"] / e["count"], 2) if e["count"] else 0,
+        }
+        if symbolise and table.addresses:
+            hit = table.name_for(e["addr"])
+            if hit:
+                item["symbol"] = (f"{hit[0]}+0x{hit[1]:x}" if hit[1]
+                                  else hit[0])
+        entries.append(item)
+
+    return {
+        "range": f"&{raw['base']:07X}+{raw['words'] * 4:#x}",
+        "total_cycles": raw["total_cycles"],
+        "total_instructions": raw["total_instructions"],
+        "mean_cycles_per_instruction": round(
+            raw["total_cycles"] / raw["total_instructions"], 3)
+        if raw["total_instructions"] else 0,
+        "hottest": entries,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1478,3 +1478,95 @@ void vidc_debug_print(char *s)
 		   stereo_images[stereoimages[4]], stereo_images[stereoimages[5]],
 		   stereo_images[stereoimages[6]], stereo_images[stereoimages[7]]);
 }
+
+/*Machine-readable form of the above, for automated front-ends. Reports the
+  derived mode geometry and timing as well as the raw registers, because the
+  numbers a demo author actually wants - resolution, frame rate, cycles per
+  scanline - are computed from several registers at once.*/
+int vidc_get_state_json(char *s, size_t len)
+{
+	int bpp = 1 << ((vidc.cr >> 2) & 3);
+	double pixel_clock_mhz = (double)((vidc.clock * pixel_rates[vidc.cr & 3]) / 24) / 1000.0;
+	int htotal = vidc.htot * 2 + 2;
+	int vtotal = vidc.vtot;
+	int sound_period = (vidcr[0xc0 >> 2] & 0xff) + 2;
+	double frame_rate = 0.0;
+	int c, o = 0;
+
+	/*Active area in real pixels. Derived exactly as the renderer does above -
+	  the horizontal registers are in units of two pixels only at the higher
+	  pixel rates, so the scaling is conditional, and the border registers can
+	  crop the display area.*/
+	int hd_start = (vidc.hbstart > vidc.hdstart) ? vidc.hbstart : vidc.hdstart;
+	int hd_end = (vidc.hbend < vidc.hdend) ? vidc.hbend : vidc.hdend;
+	int width, height;
+
+	if (monitor_type == MONITOR_MONO)
+	{
+		hd_start = vidc.hdstart * 4;
+		hd_end = vidc.hdend * 4;
+	}
+	else if (!(vidcr[VIDC_CR] & 2))
+	{
+		hd_start *= 2;
+		hd_end *= 2;
+	}
+	width = hd_end - hd_start;
+	/*Programmed active height. disp_y_min/disp_y_max are per-frame
+	  accumulators and read as zero between frames, so they are no use to a
+	  caller that samples at an arbitrary moment.*/
+	height = vidc.vdend - vidc.vdstart;
+	if (width < 0)
+		width = 0;
+	if (height < 0)
+		height = 0;
+
+	/*A VIDC "cycle" here is two pixels wide, hence the doubling.*/
+	if (htotal > 0 && vtotal > 0 && pixel_clock_mhz > 0.0)
+		frame_rate = (pixel_clock_mhz * 1000000.0) / ((double)htotal * vtotal);
+
+	o += snprintf(s + o, len - o,
+		"{\"mode\":{\"width\":%i,\"height\":%i,\"bpp\":%i,"
+		"\"frame_rate_hz\":%.3f,\"pixel_clock_mhz\":%.4f,"
+		"\"input_clock_mhz\":%.3f,\"interlaced\":%s,\"line_doubled\":%s,"
+		"\"colours\":%i},",
+		width, height, bpp, frame_rate, pixel_clock_mhz,
+		(double)vidc.clock / 1000.0,
+		vidc.interlace_enable ? "true" : "false",
+		(!vidc.scanrate && dblscan && !vidc.interlace_enable) ? "true" : "false",
+		1 << bpp);
+
+	o += snprintf(s + o, len - o,
+		"\"timing\":{\"h_total\":%i,\"h_sync\":%i,\"h_border_start\":%i,"
+		"\"h_display_start\":%i,\"h_display_end\":%i,\"h_border_end\":%i,"
+		"\"v_total\":%i,\"v_sync\":%i,\"v_border_start\":%i,"
+		"\"v_display_start\":%i,\"v_display_end\":%i,\"v_border_end\":%i,"
+		"\"current_line\":%i,\"in_display\":%s},",
+		htotal, vidc.sync * 2 + 2, vidc.hbstart,
+		vidc.hdstart, vidc.hdend, vidc.hbend,
+		vtotal, vidc.vsync, vidc.vbstart,
+		vidc.vdstart, vidc.vdend, vidc.vbend,
+		vidc.line, vidc.in_display ? "true" : "false");
+
+	o += snprintf(s + o, len - o,
+		"\"cursor\":{\"x\":%i,\"y_start\":%i,\"y_end\":%i},",
+		vidc.cx, vidc.cys >> 14, vidc.cye >> 14);
+
+	o += snprintf(s + o, len - o,
+		"\"sound\":{\"period\":%i,\"frequency_khz\":%i},",
+		sound_period, ((vidc.clock * 1000) / 24) / sound_period);
+
+	o += snprintf(s + o, len - o, "\"control\":%u,\"palette\":[", vidc.cr);
+	for (c = 0; c < 16; c++)
+		o += snprintf(s + o, len - o, "%s%u", c ? "," : "", vidcr[c]);
+	o += snprintf(s + o, len - o,
+		"],\"border\":%u,\"cursor_palette\":[%u,%u,%u],",
+		vidcr[16], vidcr[17], vidcr[18], vidcr[19]);
+
+	o += snprintf(s + o, len - o,
+		"\"dma\":{\"video_addr\":%u,\"cursor_addr\":%u},\"frames\":%i}",
+		vidc_get_current_vaddr() << 2, vidc_get_current_caddr() << 2,
+		vidc_framecount);
+
+	return o;
+}

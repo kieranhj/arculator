@@ -1,6 +1,8 @@
 #ifndef _VIDC_H_
 #define _VIDC_H_
 
+#include <stddef.h>
+
 extern int vidc_displayon;
 
 extern void vidc_redovideotiming();
@@ -28,6 +30,9 @@ uint32_t vidc_get_current_vaddr(void);
 uint32_t vidc_get_current_caddr(void);
 
 void vidc_debug_print(char *s);
+
+/*Machine-readable state, for automated front-ends*/
+int vidc_get_state_json(char *s, size_t len);
 
 
 typedef struct

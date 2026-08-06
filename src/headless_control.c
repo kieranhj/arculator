@@ -329,7 +329,20 @@ static int cmd_dump(const char *what)
 		len = debugger_capture_end();
 		return respond_ok(buf, len);
 	}
-	return respond_err("unknown dump target '%s' (want ioc, memc, memc_cam or vidc)", what);
+	if (!strcmp(what, "vidc_json"))
+	{
+		char tmp[8192];
+		int len = vidc_get_state_json(tmp, sizeof(tmp));
+		return respond_ok(tmp, len);
+	}
+	if (!strcmp(what, "memc_json"))
+	{
+		char tmp[4096];
+		int len = memc_get_state_json(tmp, sizeof(tmp));
+		return respond_ok(tmp, len);
+	}
+	return respond_err("unknown dump target '%s' (want ioc, memc, memc_cam, "
+			   "vidc, vidc_json or memc_json)", what);
 }
 
 static int cmd_read(uint32_t addr, uint32_t len)
@@ -596,6 +609,142 @@ static int cmd_trap(const char *name, int enable)
 	return respond_err("unknown trap '%s' (want prefabort, dataabort, addrexcep, undefins or swi)", name);
 }
 
+/*Cap the profiled range so a careless request cannot ask for a 12-byte-per-word
+  allocation over the whole 64MB address space.*/
+#define PROFILE_MAX_WORDS (4 * 1024 * 1024)
+
+static void profile_free(void)
+{
+	free(arm_profile_counts);
+	free(arm_profile_cycles);
+	arm_profile_counts = NULL;
+	arm_profile_cycles = NULL;
+	arm_profile_words = 0;
+}
+
+static int cmd_profile(int argc, char **argv)
+{
+	uint32_t base, len;
+
+	if (argc < 2)
+		return respond_err("profile: want start <addr> <length>, stop, or read [top]");
+
+	if (!strcmp(argv[1], "start"))
+	{
+		if (argc < 4 || !parse_u32(argv[2], &base) || !parse_u32(argv[3], &len))
+			return respond_err("profile start: expected <hex addr> <hex length>");
+
+		base &= ~3;
+		len = (len + 3) & ~3;
+		if (!len)
+			return respond_err("profile start: length must not be zero");
+		if ((len >> 2) > PROFILE_MAX_WORDS)
+			return respond_err("profile start: range of %u bytes exceeds the %u byte maximum",
+				len, PROFILE_MAX_WORDS * 4);
+		if (base >= ADDR_LIMIT || (uint64_t)base + len > ADDR_LIMIT)
+			return respond_err("profile start: range %07x+%u is outside 0..%07x",
+				base, len, ADDR_LIMIT);
+
+		profile_free();
+		arm_profile_counts = calloc(len >> 2, sizeof(uint32_t));
+		arm_profile_cycles = calloc(len >> 2, sizeof(uint64_t));
+		if (!arm_profile_counts || !arm_profile_cycles)
+		{
+			profile_free();
+			return respond_err("profile start: out of memory for a %u byte range", len);
+		}
+		arm_profile_base = base;
+		arm_profile_total_cycles = 0;
+		arm_profile_total_instructions = 0;
+		/*Published last - the interpreter tests this pointer to decide
+		  whether to profile at all.*/
+		arm_profile_words = len >> 2;
+		return respond_text("{\"base\":%u,\"words\":%u}", base, arm_profile_words);
+	}
+
+	if (!strcmp(argv[1], "stop"))
+	{
+		profile_free();
+		return respond_text("stopped");
+	}
+
+	if (!strcmp(argv[1], "read"))
+	{
+		int top = 32;
+		int64_t n;
+		char *buf;
+		int o = 0, emitted = 0;
+		size_t buf_size;
+		uint32_t c;
+		int ret;
+
+		if (!arm_profile_counts)
+			return respond_err("no profile is running; call profile start first");
+		if (argc >= 3)
+		{
+			if (!parse_i64(argv[2], &n) || n < 1 || n > 4096)
+				return respond_err("profile read: top count must be 1..4096");
+			top = (int)n;
+		}
+
+		buf_size = (size_t)top * 96 + 512;
+		buf = malloc(buf_size);
+		if (!buf)
+			return respond_err("out of memory");
+
+		o += snprintf(buf + o, buf_size - o,
+			"{\"base\":%u,\"words\":%u,\"total_cycles\":%llu,"
+			"\"total_instructions\":%llu,\"entries\":[",
+			arm_profile_base, arm_profile_words,
+			(unsigned long long)arm_profile_total_cycles,
+			(unsigned long long)arm_profile_total_instructions);
+
+		/*Selection sort over the top N by cycle cost. The range can be
+		  large but N is small, so this beats sorting the whole array.*/
+		{
+			uint32_t *taken = calloc(arm_profile_words, sizeof(uint32_t));
+
+			if (!taken)
+			{
+				free(buf);
+				return respond_err("out of memory");
+			}
+			while (emitted < top)
+			{
+				uint64_t best_cycles = 0;
+				uint32_t best = 0xffffffff;
+
+				for (c = 0; c < arm_profile_words; c++)
+				{
+					if (!taken[c] && arm_profile_cycles[c] > best_cycles)
+					{
+						best_cycles = arm_profile_cycles[c];
+						best = c;
+					}
+				}
+				if (best == 0xffffffff)
+					break;
+				taken[best] = 1;
+				o += snprintf(buf + o, buf_size - o,
+					"%s{\"addr\":%u,\"count\":%u,\"cycles\":%llu}",
+					emitted ? "," : "",
+					arm_profile_base + (best << 2),
+					arm_profile_counts[best],
+					(unsigned long long)arm_profile_cycles[best]);
+				emitted++;
+			}
+			free(taken);
+		}
+
+		o += snprintf(buf + o, buf_size - o, "]}");
+		ret = respond_ok(buf, o);
+		free(buf);
+		return ret;
+	}
+
+	return respond_err("profile: unknown action '%s'", argv[1]);
+}
+
 static int cmd_info(void)
 {
 	char buf[2048];
@@ -773,6 +922,9 @@ static int dispatch(char *line)
 			return respond_err("trap: expected <name> <0|1>");
 		return cmd_trap(argv[1], atoi(argv[2]));
 	}
+
+	if (!strcmp(argv[0], "profile"))
+		return cmd_profile(argc, argv);
 
 	if (!strcmp(argv[0], "screenshot"))
 		return cmd_screenshot();
