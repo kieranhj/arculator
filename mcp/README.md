@@ -104,11 +104,27 @@ filename: `,ff8` Absolute, `,ffb` BASIC, `,ffa` Module, `,fff` Text.
 **Machines** — `create_machine`, `destroy_machine`, `list_machines`,
 `reset_machine`, `machine_info`
 
+Three machine configurations ship in `configs/`, all RISC OS 3.11:
+
+| Config | CPU | MEMC |
+|---|---|---|
+| `a3000-riscos311` (default) | ARM2 at 8 MHz | MEMC1 |
+| `a3020-riscos311` | ARM250 at 12 MHz | MEMC1A |
+| `a5000-arm3-riscos311` | ARM3 at 25 MHz | MEMC1A |
+
+The A3020 and A5000 specify the WD1772 rather than the 82C711 their real
+hardware has — see "Known issues" below. It affects floppy emulation only.
+
 **Execution** — `run_for_cycles`, `run_for_ms`, `step_instructions`,
 `run_until_break`
 
 **State** — `read_registers`, `read_memory`, `write_memory`, `disassemble`,
-`dump_chip_state` (ioc / memc / memc_cam / vidc)
+`read_video_state`, `read_memc_state`, `dump_chip_state` (ioc / memc /
+memc_cam / vidc, as text)
+
+**Symbols** — `load_symbols`, `lookup_symbol`, `list_symbols`
+
+**Profiling** — `profile_start`, `profile_read`, `profile_stop`
 
 **Debugging** — `set_breakpoint`, `clear_breakpoint`, `set_write_breakpoint`,
 `set_watchpoint`, `list_breakpoints`, `clear_all_breakpoints`, `set_trap`
@@ -146,11 +162,55 @@ disabled, so a run does not rewrite the machine `.cfg` or the CMOS image and
 cannot depend on what ran before it. Pass `--persist` to the binary if you want
 the normal write-back.
 
+## Symbols and profiling
+
+`load_symbols` reads what a vasm/vlink build already produces — prefer
+`vlink -vicelabels`, but link maps (`-M`) and vasm listings (`-L`) work too.
+Once loaded, a symbol name or `name+offset` is accepted anywhere an address
+is, and disassembly and register dumps are annotated:
+
+```
+0008020 <main> : (e28f0f86) ADD R0, R15, #218
+```
+
+Constants are separated from addresses, because a build defines hundreds of
+`.equ` values that would otherwise poison address lookup. When a link map is
+loaded its section ranges decide this exactly; otherwise the value has to look
+like an address, floored at `&8000`. Note that vlink tags real code labels
+`local abs` exactly as it tags constants when code is linked to a fixed
+origin, so the tag itself is not usable.
+
+`profile_start` / `profile_read` accumulate an execution count **and a cycle
+cost** per instruction word. Cycles are the point: the same instruction costs
+very different amounts depending on whether it hits ROM, DRAM in page or out
+of page, and on how much the video DMA is stealing. `profile_read` ranks by
+cycles and names each hot spot from the symbol table.
+
+`read_video_state` gives the derived mode (resolution, bpp, frame rate, pixel
+clock), the full VIDC timing registers, the palette, and — useful for raster
+work — `timing.current_line` and `in_display`, which say where the beam is
+right now. `read_memc_state` gives page size, DMA enables and both the
+programmed and live DMA pointers.
+
+## Known issues
+
+**82C711 machines hang at boot with an empty drive.** `82c711_fdc.c` cases 7
+(Recalibrate) and 0xf (Seek) disable the FDC timer and call `disc_seek()`,
+which does nothing when no image is loaded, so no completion interrupt is ever
+raised and the OS spins forever — observed at `&38E56F8`, unresponsive even to
+keystrokes. A real 82C711 signals seek-end from the controller without needing
+media. This is why the shipped A3020 and A5000 configs specify the WD1772,
+which has an independent index-pulse timeout. Loading a disc image does not
+help, because the seek still never completes.
+
 ## Tests
 
 ```sh
-python mcp/tests/integration.py                 # 20 checks across every subsystem
+python mcp/tests/integration.py                 # 23 checks across every subsystem
+python mcp/tests/configs.py                     # every shipped machine boots to the desktop
 python mcp/tests/run_code.py                    # host-assembled ARM code run in the guest
+python mcp/tests/symbols_e2e.py                 # symbols against a real vasm/vlink build
+python mcp/tests/profile_video.py               # VIDC/MEMC state and the profiler
 python mcp/tests/run_demo.py '<path to !App>'   # a real RISC OS application
 ```
 
