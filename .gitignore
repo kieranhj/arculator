@@ -57,3 +57,10 @@ HardImage[0-9]*
 /mcp/tests/out/
 __pycache__/
 *.pyc
+
+# ROM images. Acorn's, not ours to redistribute - see roms/*/roms.txt for
+# what belongs where.
+/roms/**
+!/roms/**/
+!/roms/**/roms.txt
+!/roms/arcrom_ext

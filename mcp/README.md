@@ -41,32 +41,34 @@ make MAKE=make -j$(nproc)
 This produces `arculator-headless.exe` alongside the normal `arculator.exe`.
 See the root `CLAUDE.md` for why each flag is needed.
 
+The server needs version 2.0 or newer of the MCP SDK — it is built on
+`mcp.server.mcpserver.MCPServer`, which 1.x does not have:
+
 ```sh
-pip install mcp
+pip install "mcp>=2.0"
 ```
 
 ## Registering with Claude Code
 
+Substituting the absolute path of your checkout:
+
 ```sh
-claude mcp add arculator -- python -m arculator_mcp
+claude mcp add arculator \
+    -e ARCULATOR_ROOT=/path/to/arculator \
+    -e PYTHONPATH=/path/to/arculator/mcp \
+    -- python -m arculator_mcp
 ```
 
-or add to `.mcp.json`:
+`PYTHONPATH` is what makes `arculator_mcp` importable; `ARCULATOR_ROOT` is
+only needed if the emulator and its `roms/` are somewhere other than the
+directory above the package.
 
-```json
-{
-  "mcpServers": {
-    "arculator": {
-      "command": "python",
-      "args": ["-m", "arculator_mcp"],
-      "cwd": "C:/Users/khcon/OneDrive/Projects/arculator-sarah/mcp",
-      "env": {
-        "ARCULATOR_ROOT": "C:/Users/khcon/OneDrive/Projects/arculator-sarah"
-      }
-    }
-  }
-}
-```
+## ROM images
+
+`roms/` ships only the descriptor files and Arculator's own support ROM.
+The machine ROMs are Acorn's and are not distributed here: put your own
+`ros311` into `roms/riscos311/` (and so on — each `roms.txt` names what
+belongs beside it) before creating a machine.
 
 Environment:
 
