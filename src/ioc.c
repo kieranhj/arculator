@@ -43,17 +43,75 @@ void dumpiocregs()
 	printf("STAT : %02X %02X %02X  MASK : %02X %02X %02X\n",ioc.irqa,ioc.irqb,ioc.fiq,ioc.mska,ioc.mskb,ioc.mskf);
 }
 
-static void load_timer(int timer_nr)
+/*Timers 2 and 3 only clock the serial and keyboard baud rates: they raise no
+  interrupt and their expiry has no effect. Re-arming them on every period put
+  a timer list insertion on the CPU loop every 2 us at the keyboard's baud
+  rate, so instead they keep their next expiry and period here, and the count
+  is worked out when the guest latches it.*/
+#define IOC_LAZY_TIMER(n) ((n) >= 2)
+static uint64_t lazy_next_ts[4], lazy_period[4];
+
+static uint64_t timer_period(int timer_nr)
 {
 	if (ioc.timerl[timer_nr])
-		timer_set_delay_u64(&ioc.timers[timer_nr], ((ioc.timerl[timer_nr] + 1) * TIMER_USEC) / 2);
-	else
-		timer_set_delay_u64(&ioc.timers[timer_nr], ((0x10000 + 1) * TIMER_USEC) / 2);
+		return ((ioc.timerl[timer_nr] + 1) * TIMER_USEC) / 2;
+	return ((0x10000 + 1) * TIMER_USEC) / 2;
+}
+
+/*Step a lazy timer past every expiry the emulated CPU would have processed by
+  now, as the callback used to (an expiry is processed once the integer part
+  of the TSC reaches it).*/
+static void lazy_timer_catch_up(int timer_nr)
+{
+	uint32_t now = (uint32_t)(tsc >> 32);
+	uint64_t period = lazy_period[timer_nr];
+
+	if (TIMER_VAL_LESS_THAN_VAL((uint32_t)(lazy_next_ts[timer_nr] >> 32), now))
+	{
+		uint64_t behind = (tsc & ~0xffffffffull) - (lazy_next_ts[timer_nr] & ~0xffffffffull);
+
+		lazy_next_ts[timer_nr] += (behind / period) * period;
+		while (TIMER_VAL_LESS_THAN_VAL((uint32_t)(lazy_next_ts[timer_nr] >> 32), now))
+			lazy_next_ts[timer_nr] += period;
+	}
+}
+
+/*A latch write takes effect at the next reload, as the callback used to read
+  the latch only when re-arming.*/
+static void lazy_timer_latch_written(int timer_nr)
+{
+	if (IOC_LAZY_TIMER(timer_nr))
+	{
+		lazy_timer_catch_up(timer_nr);
+		lazy_period[timer_nr] = timer_period(timer_nr);
+	}
+}
+
+static void load_timer(int timer_nr)
+{
+	if (IOC_LAZY_TIMER(timer_nr))
+	{
+		/*As timer_set_delay_u64(): the TSC's fraction is dropped.*/
+		lazy_period[timer_nr] = timer_period(timer_nr);
+		lazy_next_ts[timer_nr] = (tsc & ~0xffffffffull) + lazy_period[timer_nr];
+		return;
+	}
+	timer_set_delay_u64(&ioc.timers[timer_nr], timer_period(timer_nr));
 }
 
 static uint16_t read_timer(int timer_nr)
 {
-	uint64_t remaining = timer_get_remaining_u64(&ioc.timers[timer_nr]);
+	uint64_t remaining;
+
+	if (IOC_LAZY_TIMER(timer_nr))
+	{
+		lazy_timer_catch_up(timer_nr);
+		remaining = lazy_next_ts[timer_nr] - tsc;
+		if ((int64_t)remaining < 0)
+			remaining = 0;
+	}
+	else
+		remaining = timer_get_remaining_u64(&ioc.timers[timer_nr]);
 
 	remaining = (remaining * 2) / TIMER_USEC;
 
@@ -126,9 +184,11 @@ void ioc_write(uint32_t addr, uint32_t v)
 		return;
 		case 0x60:
 		ioc.timerl[2] = (ioc.timerl[2] & 0xff00) | v;
+		lazy_timer_latch_written(2);
 		return;
 		case 0x64:
 		ioc.timerl[2] = (ioc.timerl[2] & 0x00ff) | (v << 8);
+		lazy_timer_latch_written(2);
 		return;
 		case 0x68:
 		load_timer(2);
@@ -138,9 +198,11 @@ void ioc_write(uint32_t addr, uint32_t v)
 		return;
 		case 0x70:
 		ioc.timerl[3] = (ioc.timerl[3] & 0xff00) | v;
+		lazy_timer_latch_written(3);
 		return;
 		case 0x74:
 		ioc.timerl[3] = (ioc.timerl[3] & 0x00ff) | (v << 8);
+		lazy_timer_latch_written(3);
 		return;
 		case 0x78:
 		load_timer(3);
@@ -287,8 +349,15 @@ void ioc_reset()
 	ioc.irqb = 2;
 	timer_add(&ioc.timers[0], ioc_timer_callback, (void *)0, 1);
 	timer_add(&ioc.timers[1], ioc_timer_callback, (void *)1, 1);
-	timer_add(&ioc.timers[2], ioc_timer_callback, (void *)2, 1);
-	timer_add(&ioc.timers[3], ioc_timer_callback, (void *)3, 1);
+	/*Timers 2 and 3 are never put on the timer list; see IOC_LAZY_TIMER.
+	  They start expired, as timer_add() with start_timer would.*/
+	timer_add(&ioc.timers[2], ioc_timer_callback, (void *)2, 0);
+	timer_add(&ioc.timers[3], ioc_timer_callback, (void *)3, 0);
+	for (int c = 2; c < 4; c++)
+	{
+		lazy_period[c] = timer_period(c);
+		lazy_next_ts[c] = tsc & ~0xffffffffull;
+	}
 }
 
 void ioc_discchange(int drive)
