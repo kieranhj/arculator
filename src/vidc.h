@@ -38,6 +38,7 @@ int vidc_get_state_json(char *s, size_t len);
 typedef struct
 {
 	int w, h;
+	int pitch;              /*bytes from one row to the next; not w * 4*/
 	uint8_t *dat;
 	uint8_t *line[0];
 } BITMAP;
@@ -58,5 +59,12 @@ typedef RGB PALETTE[256];
 #define makecol32(r, g, b)  ((b) | ((g) << 8) | ((r) << 16))
 
 void clear(BITMAP *b);
+
+/*Optional: called after the VIDC renderer has rewritten row `row` of `b`,
+  and with row -1 when the whole bitmap has been cleared. A front-end that
+  converts the frame to its own format can do so a line at a time, while
+  the line is still in the host cache, instead of reading the whole bitmap
+  back at frame end. NULL (the default) costs one test per scanline.*/
+extern void (*vidc_line_callback)(BITMAP *b, int row);
 
 #endif /* _VIDC_H_ */

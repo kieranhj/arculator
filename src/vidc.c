@@ -64,19 +64,28 @@ int fullborders,noborders;
 int dblscan;
 
 
+void (*vidc_line_callback)(BITMAP *b, int row);
+
 void clear(BITMAP *b)
 {
-	memset(b->dat, 0, b->w * b->h * 4);
+	memset(b->dat, 0, (size_t)b->pitch * b->h);
+	if (vidc_line_callback)
+		vidc_line_callback(b, -1);
 }
 
 BITMAP *create_bitmap(int x, int y)
 {
 	BITMAP *b = (BITMAP *)malloc(sizeof(BITMAP) + (y * sizeof(uint8_t *)));
 	int c;
-	b->dat = (uint8_t *)malloc(x * y * 4);
+	/*Pad each row by one cache line. At a power-of-two pitch (16 KB for the
+	  VIDC's 4096-pixel rows) every row maps to the same cache sets, so a
+	  host CPU with a small set-associative cache (an ARM Cortex-A53's 32 KB
+	  4-way L1 and 512 KB L2) keeps only a few rows of the frame cached.*/
+	b->pitch = x * 4 + 64;
+	b->dat = (uint8_t *)malloc((size_t)b->pitch * y);
 	for (c = 0; c < y; c++)
 	{
-		b->line[c] = b->dat + (c * x * 4);
+		b->line[c] = b->dat + ((size_t)c * b->pitch);
 	}
 	b->w = x;
 	b->h = y;
@@ -102,7 +111,6 @@ int flyback;
 int deskdepth;
 int videodma=0;
 int palchange;
-uint32_t vidlookup[256];   /*Lookup table for 4bpp modes*/
 
 int redrawpalette=0;
 
@@ -201,37 +209,6 @@ void redolookup()
 			monolook[c][2]=(vidcr[c]&4)?0xFFFFFF:0x000000;
 			monolook[c][3]=(vidcr[c]&8)?0xFFFFFF:0x000000;
 		}
-	}
-	switch (vidcr[VIDC_CR]&0xF) /*Control Register*/
-	{
-		case 2: /*Mode 0*/
-		case 3: /*Mode 25*/
-		vidlookup[0]=vidc.pal[0]|(vidc.pal[0]<<16);
-		vidlookup[1]=vidc.pal[1]|(vidc.pal[0]<<16);
-		vidlookup[2]=vidc.pal[0]|(vidc.pal[1]<<16);
-		vidlookup[3]=vidc.pal[1]|(vidc.pal[1]<<16);
-		break;
-		case 6: /*Mode 8*/
-		case 7: /*Mode 26*/
-		for (c=0;c<16;c++)
-		{
-			vidlookup[c]=vidc.pal[c&0x3]|(vidc.pal[(c>>2)&0x3]<<16);
-		}
-		break;
-		case 8: /*Mode 9*/
-		case 9: /*Mode 48*/
-		for (c=0;c<16;c++)
-		{
-			vidlookup[c]=vidc.pal[c&0xF]|(vidc.pal[c&0xF]<<16);
-		}
-		break;
-		case 10: /*Mode 12*/
-		case 11: /*Mode 27*/
-		for (c=0;c<256;c++)
-		{
-			vidlookup[c]=vidc.pal[c&0xF]|(vidc.pal[(c>>4)&0xF]<<16);
-		}
-		break;
 	}
 }
 
@@ -347,9 +324,9 @@ void recalcse()
 		vidc.hsync_length, vidc.front_porch_length, vidc.display_length, vidc.back_porch_length);*/
 }
 
-static uint32_t vidc_make_colour(RGB r)
+static uint32_t vidc_make_colour_slow(RGB r, int acorn_black_level)
 {
-	if (video_black_level == BLACK_LEVEL_ACORN && vidc.output_enable)
+	if (acorn_black_level)
 	{
 		r.r = (MAX(r.r - 3, 0) * 255) / 12;
 		r.g = (MAX(r.g - 3, 0) * 255) / 12;
@@ -365,47 +342,72 @@ static uint32_t vidc_make_colour(RGB r)
 	return makecol(r.r, r.g, r.b);
 }
 
-void vidc_redopalette(void)
+/*Host colour for every 12-bit VIDC colour, for the current black level.
+  Demos rewrite the palette many times per frame, and the divisions above
+  were a fifth of the emulator's run time on such demos.*/
+static uint32_t colour_lut[4096];
+static int colour_lut_mode = -1;
+
+static inline uint32_t vidc_make_colour(int r, int g, int b)
 {
-	for (int i = 0; i < 20; i++)
+	int mode = (video_black_level == BLACK_LEVEL_ACORN && vidc.output_enable);
+
+	if (mode != colour_lut_mode)
 	{
-		uint32_t v = vidcr[i];
-		RGB r =
+		for (int i = 0; i < 4096; i++)
 		{
-			.b = (v & 0xf00) >> 8,
-			.g = (v & 0xf0) >> 4,
-			.r = v & 0xf
-		};
-
-		vidc.pal[i] = vidc_make_colour(r);
+			RGB c = { .r = i & 0xf, .g = (i >> 4) & 0xf, .b = i >> 8 };
+			colour_lut[i] = vidc_make_colour_slow(c, mode);
+		}
+		colour_lut_mode = mode;
 	}
+	return colour_lut[r | (g << 4) | (b << 8)];
+}
 
-	for (int i = 0; i < 256; i++)
+/*Recompute the host colours that depend on palette register i (0-15 logical
+  colours, 16 border, 17-19 cursor). In 8bpp modes register i supplies the
+  low bits of the 16 pal8 entries whose low nibble is i.*/
+static void vidc_update_palette_entry(int i)
+{
+	uint32_t v = vidcr[i];
+
+	vidc.pal[i] = vidc_make_colour(v & 0xf, (v >> 4) & 0xf, (v >> 8) & 0xf);
+
+	if (i < 16)
 	{
-		uint32_t v = vidcr[i & 0xf];
-		RGB r =
+		for (int hi = 0; hi < 256; hi += 16)
 		{
-			.b = (v & 0x700) >> 8,
-			.g = (v & 0x30) >> 4,
-			.r = v & 0x7
-		};
+			int j = hi | i;
+			int r = v & 0x7, g = (v >> 4) & 0x3, b = (v >> 8) & 0x7;
 
-		if (i & 0x10)
-			r.r |= 8;
-		if (i & 0x20)
-			r.g |= 4;
-		if (i & 0x40)
-			r.g |= 8;
-		if (i & 0x80)
-			r.b |= 8;
+			if (j & 0x10)
+				r |= 8;
+			if (j & 0x20)
+				g |= 4;
+			if (j & 0x40)
+				g |= 8;
+			if (j & 0x80)
+				b |= 8;
 
-		vidc.pal8[i] = vidc_make_colour(r);
+			vidc.pal8[j] = vidc_make_colour(r, g, b);
+		}
 	}
+}
 
+static void vidc_palette_changed(void)
+{
 	palchange = 1;
 
 	if (vidc.redopalette_callback)
 		vidc.redopalette_callback(vidc.callback_p);
+}
+
+void vidc_redopalette(void)
+{
+	for (int i = 0; i < 20; i++)
+		vidc_update_palette_entry(i);
+
+	vidc_palette_changed();
 }
 
 void writevidc(uint32_t v)
@@ -444,7 +446,13 @@ void writevidc(uint32_t v)
 		}*/
 		vidcr[v >> 26] = v & 0x1fff;
 		LOG_VIDC_REGISTERS("VIDC Write pal %08X %08X %08X\n",c,vidc.pal[(v>>26)&0x1F],v);
-		vidc_redopalette();
+		if (redrawpalette)
+			vidc_redopalette();
+		else
+		{
+			vidc_update_palette_entry(v >> 26);
+			vidc_palette_changed();
+		}
 		return;
 	}
 	vidcr[v>>26]=v;
@@ -1156,6 +1164,15 @@ static void vidc_poll(void *__p)
 		int htot = (vidc.htot+1)*2;
 
 		archline(buffer->line[vidc.interlace_enable ? (l*2 + (vidc.oddeven ? 1 : 0)): l], 0, vidc.interlace_enable ? (l*2 + (vidc.oddeven ? 1 : 0)): l, htot, 0);
+	}
+	/*Hand the finished scanline to the platform layer while it is still in
+	  cache (see vidc_line_callback in vidc.h).*/
+	if (vidc_line_callback)
+	{
+		int row = vidc.interlace_enable ? (l*2 + (vidc.oddeven ? 1 : 0)) : l;
+
+		if (row >= 0 && row < buffer->h)
+			vidc_line_callback(buffer, row);
 	}
 	if (vidc.data_callback)
 	{

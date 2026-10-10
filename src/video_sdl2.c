@@ -231,7 +231,7 @@ void video_renderer_update(BITMAP *src, int src_x, int src_y, int dest_x, int de
 		texture_rect.x, texture_rect.y,
 		texture_rect.w, texture_rect.h,
 		src_x, src_y, src->w);
-	SDL_UpdateTexture(texture, &texture_rect, &((uint32_t *)src->dat)[src_y * src->w + src_x], src->w * 4);
+	SDL_UpdateTexture(texture, &texture_rect, &((uint32_t *)src->line[src_y])[src_x], src->pitch);
 }
 
 static void sdl_scale(int scale, SDL_Rect src, SDL_Rect *dst, int w, int h)

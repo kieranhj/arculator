@@ -156,7 +156,7 @@ void video_renderer_update(BITMAP *src, int src_x, int src_y, int dest_x, int de
 
 	for (row = 0; row < update_rect.h; row++)
 	{
-		const uint32_t *s = &((uint32_t *)src->dat)[(src_y + row) * src->w + src_x];
+		const uint32_t *s = &((uint32_t *)src->line[src_y + row])[src_x];
 		uint32_t *d = &composition[(update_rect.y + row) * HEADLESS_FB_W + update_rect.x];
 
 		memcpy(d, s, update_rect.w * sizeof(uint32_t));

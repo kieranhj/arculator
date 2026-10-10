@@ -115,7 +115,10 @@ void recalc_min_timer(void)
 	}
 }
 
-static void run_dma(int update_tsc)
+/*Service every DMA request that has fallen due. Out of line: it is reached on
+  every N- and I-cycle, but almost always finds nothing due, so the test lives
+  in run_dma() below where it can be inlined into the callers.*/
+static void __attribute__((noinline)) run_dma_due(int update_tsc)
 {
 	while (TIMER_VAL_LESS_THAN_VAL_64(min_timer, tsc))
 	{
@@ -173,7 +176,13 @@ static void run_dma(int update_tsc)
 	}
 }
 
-static void sync_to_mclk(void)
+static inline void run_dma(int update_tsc)
+{
+	if (TIMER_VAL_LESS_THAN_VAL_64(min_timer, tsc))
+		run_dma_due(update_tsc);
+}
+
+static inline void sync_to_mclk(void)
 {
 	if (clock_domain != DOMAIN_MCLK)
 	{
@@ -296,7 +305,9 @@ enum
 
 static int cache_was_on = 0;
 static int promote_fetch_to_n = PROMOTE_NONE;
-void cache_read_timing(uint32_t addr, int is_n_cycle, int is_merged_fetch)
+/*Full read timing model, including the ARM3 cache. Kept out of line; machines
+  without the cache enabled take the inline path in cache_read_timing_fast().*/
+static void __attribute__((noinline)) cache_read_timing_full(uint32_t addr, int is_n_cycle, int is_merged_fetch)
 {
 #ifndef RELEASE_BUILD
 	if (addr & ~0x3ffffff)
@@ -417,6 +428,40 @@ void cache_read_timing(uint32_t addr, int is_n_cycle, int is_merged_fetch)
 		}
 	}
 }
+
+/*The same model as cache_read_timing_full(), with the no-cache case (every
+  ARM2 and ARM250 access, and ARM3 with the cache off) inlined into the
+  callers. This sits on every instruction fetch, and the out-of-line call
+  alone cost more than the work it does.*/
+static inline void cache_read_timing_fast(uint32_t addr, int is_n_cycle, int is_merged_fetch)
+{
+	if (cp15_cacheon)
+	{
+		cache_read_timing_full(addr, is_n_cycle, is_merged_fetch);
+		return;
+	}
+	if (is_n_cycle)
+	{
+		cache_was_on = 0;
+		sync_to_mclk();
+		CLOCK_N(addr);
+		mem_available_ts = tsc;
+		/*Merged fetch doesn't cause extended I-cycle on MEMC1*/
+		if (memc_is_memc1 && is_merged_fetch == PROMOTE_MERGE)
+			last_cycle_length = mem_speed[(addr >> 12) & 0x3fff][0];
+	}
+	else
+	{
+		CLOCK_S(addr);
+		mem_available_ts = tsc;
+	}
+}
+
+void cache_read_timing(uint32_t addr, int is_n_cycle, int is_merged_fetch)
+{
+	cache_read_timing_fast(addr, is_n_cycle, is_merged_fetch);
+}
+#define cache_read_timing cache_read_timing_fast
 
 void cache_flush()
 {
