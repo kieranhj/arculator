@@ -12,3 +12,4 @@ arc.cfg
 arclog.txt
 rocket_log.txt
 hostfs/Rocket
+hostfs/*

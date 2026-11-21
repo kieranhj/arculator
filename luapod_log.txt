@@ -1,0 +1,5 @@
+luapod_init: Calling luaL_newstate().
+luapod_init: Calling lua_open_builtins().
+luapod_init: Calling registerLuaFunction().
+luapod_init: Loading Lua script 'C:\Users\khcon\OneDrive\Archie\Repos\archie-verse\particles.lua'.
+luapod_init: Lua returned error 'cannot open C:\Users\khcon\OneDrive\Archie\Repos\archie-verse\particles.lua: No such file or directory'
