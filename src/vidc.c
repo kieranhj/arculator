@@ -1434,6 +1434,7 @@ void vidc_debug_print(char *s)
 		   " Horizontal border end   =%4i   Vertical border end   =%4i\n"
 		   " Horizontal cursor start =%4i   Vertical cursor start =%4i\n"
 		   "                                 Vertical cursor end   =%4i\n"
+		   " Current scaline=%4i\n"
 		   " Interlace=%4i\n"
 		   " Sound period=%i  frequency=%i kHz\n"
 		   " Control=%x\n"
@@ -1451,6 +1452,7 @@ void vidc_debug_print(char *s)
 		   vidc.hbend, vidc.vbend,
 		   vidc.cx, vidc.cys >> 14,
 		   vidc.cye >> 14,
+		   vidc.line,
 		   vidc.inter,
 		   (vidcr[0xc0 >> 2] & 0xff) + 2,
 		   ((vidc.clock * 1000) / 24) / ((vidcr[0xc0 >> 2] & 0xff) + 2),
