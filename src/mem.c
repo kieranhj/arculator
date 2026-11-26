@@ -22,6 +22,10 @@
 #include "vidc.h"
 #include "wd1770.h"
 
+/*When clear, user mode code may access IOC, VIDC and MEMC, which normally
+  require supervisor mode. Global option "mem_super_req" in arc.cfg.*/
+int mem_super_req = 1;
+
 uint64_t mem_speed[16384][2];
 
 int mem_dorefresh;
@@ -280,7 +284,7 @@ uint8_t readmemfb(uint32_t a)
 		case 0x31:
 		case 0x32: /*IOC*/
 		case 0x33:
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		if (!(a & ((1 << 16) | (1 << 17) | (1 << 21)))) /*MEMC podule space*/
@@ -422,7 +426,7 @@ uint32_t readmemfl(uint32_t a)
 		case 0x31:
 		case 0x32: /*IOC*/
 		case 0x33:
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		if (!(a & ((1 << 16) | (1 << 17) | (1 << 21)))) /*MEMC podule space*/
@@ -580,7 +584,7 @@ void writememfb(uint32_t a,uint8_t v)
 		case 0x31:
 		case 0x32: /*IOC*/
 		case 0x33:
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		if (!(a & ((1 << 16) | (1 << 17) | (1 << 21)))) /*MEMC podule space*/
@@ -734,7 +738,7 @@ void writememfl(uint32_t a,uint32_t v)
 		case 0x31:
 		case 0x32: /*IOC*/
 		case 0x33:
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		if (!(a & ((1 << 16) | (1 << 17) | (1 << 21)))) /*MEMC podule space*/
@@ -831,14 +835,14 @@ void writememfl(uint32_t a,uint32_t v)
 		}
 		return;
 		case 0x34: case 0x35: /*VIDC*/
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		LOG_VIDC_REGISTERS("Write VIDC %08X %08X %07X %08X\n",a,v,PC,armregs[15]);
 		writevidc(v);
 		return;
 		case 0x36: /*MEMC*/
-		if (memmode != MEMMODE_SUPER)
+		if (mem_super_req && memmode != MEMMODE_SUPER)
 			goto data_abort;
 
 		writememc(a);

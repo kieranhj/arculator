@@ -29,6 +29,7 @@ extern "C"
 	#include "config.h"
 	#include "debugger.h"
 	#include "disc.h"
+	#include "mem.h"
 	#include "plat_joystick.h"
 	#include "plat_video.h"
 	#include "romload.h"
@@ -231,6 +232,9 @@ void Frame::UpdateMenu()
 
 	item = find_item(XRCID("IDM_DEBUGGER_ENABLE"));
 	item->Check(debug);
+
+	item = find_item(XRCID("IDM_SUPER_REQUIRED"));
+	item->Check(mem_super_req);
 }
 
 void Frame::OnPopupMenuEvent(PopupMenuEvent &event)
@@ -566,6 +570,13 @@ void OnMenuCommandCommon( wxCommandEvent &event, wxWindow *parent)
 
 		video_black_level = BLACK_LEVEL_NORMAL;
 		vidc_redopalette();
+	}
+	else if (event.GetId() == XRCID("IDM_SUPER_REQUIRED"))
+	{
+		wxMenuItem *item = find_item(event.GetId());
+
+		mem_super_req ^= 1;
+		item->Check(mem_super_req);
 	}
 	else if (event.GetId() == XRCID("IDM_DEBUGGER_ENABLE"))
 	{

@@ -290,6 +290,10 @@
 			<object class="wxMenuItem" name="IDM_SETTINGS_CONFIGURE">
 				<label>_Configure machine...</label>
 			</object>
+			<object class="wxMenuItem" name="IDM_SUPER_REQUIRED">
+				<label>_Supervisor mode required</label>
+				<checkable>1</checkable>
+			</object>
 		</object>
 		<object class="wxMenu">
 			<label>_Debugger</label>
@@ -568,6 +572,10 @@
 			<label>_Settings</label>
 			<object class="wxMenuItem" name="IDM_SETTINGS_CONFIGURE">
 				<label>_Configure machine...</label>
+			</object>
+			<object class="wxMenuItem" name="IDM_SUPER_REQUIRED">
+				<label>_Supervisor mode required</label>
+				<checkable>1</checkable>
 			</object>
 		</object>
 		<object class="wxMenu">

@@ -9,6 +9,7 @@
 #include "disc.h"
 #include "fpa.h"
 #include "joystick.h"
+#include "mem.h"
 #include "memc.h"
 #include "plat_joystick.h"
 #include "plat_video.h"
@@ -712,6 +713,7 @@ void loadconfig()
 	sound_gain = config_get_int(CFG_GLOBAL, NULL, "sound_gain", 0);
 	sound_filter = config_get_int(CFG_GLOBAL, NULL, "sound_filter", 0);
 	disc_noise_gain = config_get_int(CFG_GLOBAL, NULL, "disc_noise_gain", 0);
+	mem_super_req = config_get_int(CFG_GLOBAL, NULL, "mem_super_req", 1);
 	unique_id = config_get_int(CFG_MACHINE, NULL, "unique_id", 0);
 	memsize = config_get_int(CFG_MACHINE, NULL, "mem_size", 4096);
 	p = (char *)config_get_string(CFG_MACHINE, NULL, "rom_set", "riscos311");
@@ -894,6 +896,7 @@ void saveconfig()
 	config_set_int(CFG_GLOBAL, NULL, "sound_gain", sound_gain);
 	config_set_int(CFG_GLOBAL, NULL, "sound_filter", sound_filter);
 	config_set_int(CFG_GLOBAL, NULL, "disc_noise_gain", disc_noise_gain);
+	config_set_int(CFG_GLOBAL, NULL, "mem_super_req", mem_super_req);
 	config_set_int(CFG_MACHINE, NULL, "unique_id", unique_id);
 	config_set_string(CFG_MACHINE, NULL, "hd4_fn", hd_fn[0]);
 	config_set_int(CFG_MACHINE, NULL, "hd4_sectors", hd_spt[0]);
